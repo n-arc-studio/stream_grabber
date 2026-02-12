@@ -37,41 +37,94 @@ class M3U8Parser {
     _visitedUrls.add(websiteUrl);
 
     try {
-      final response = await _dio.get(
-        websiteUrl,
-        options: Options(
-          headers: {
-            'Referer': websiteUrl,
-          },
-        ),
-      );
+      print('Fetching URL: $websiteUrl (depth: $depth)');
+      
+      // まずリダイレクトなしで取得を試みる
+      Response response;
+      try {
+        response = await _dio.get(
+          websiteUrl,
+          options: Options(
+            headers: {
+              'Referer': websiteUrl,
+              'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+            },
+            followRedirects: false, // リダイレクトを無効化
+            validateStatus: (status) => status! < 400, // 3xxも成功として扱う
+          ),
+        );
+      } catch (e) {
+        // リダイレクトエラーの場合、通常通り取得
+        print('Retry with redirects enabled');
+        response = await _dio.get(
+          websiteUrl,
+          options: Options(
+            headers: {
+              'Referer': websiteUrl,
+            },
+          ),
+        );
+      }
+      
       final document = html_parser.parse(response.data);
       final bodyText = response.data.toString();
+      
+      print('Response status: ${response.statusCode}');
+      print('Content length: ${bodyText.length}');
+      print('Final URL: ${response.realUri}');
       
       final List<String> videoUrls = [];
       final Set<String> urlSet = {}; // 重複除去用
 
       // 1. iframeのsrc属性を検索（埋め込み動画）
       final iframes = document.getElementsByTagName('iframe');
+      print('Found ${iframes.length} iframe(s)');
+      
       for (var iframe in iframes) {
-        final src = iframe.attributes['src'] ?? iframe.attributes['data-src'];
+        final src = iframe.attributes['src'] ?? 
+                    iframe.attributes['data-src'] ?? 
+                    iframe.attributes['data-lazy-src'];
         if (src != null && src.isNotEmpty) {
-          // iframeの中身を取得してみる
-          if (src.startsWith('http')) {
-            try {
-              final iframeUrls = await detectM3U8FromWebsite(src, depth: depth + 1);
-              urlSet.addAll(iframeUrls);
-            } catch (e) {
-              print('Failed to fetch iframe: $src - $e');
+          print('iframe src: $src');
+          
+          // 相対URLを絶対URLに変換
+          String iframeSrc = src;
+          if (!src.startsWith('http')) {
+            final baseUri = Uri.parse(websiteUrl);
+            if (src.startsWith('//')) {
+              iframeSrc = '${baseUri.scheme}:$src';
+            } else if (src.startsWith('/')) {
+              iframeSrc = '${baseUri.scheme}://${baseUri.host}$src';
+            } else {
+              iframeSrc = '${baseUri.scheme}://${baseUri.host}/${baseUri.path}/$src';
             }
+          }
+          
+          // 広告ドメインをスキップ
+          if (!_isAdDomain(iframeSrc)) {
+            try {
+              print('Fetching iframe content: $iframeSrc');
+              final iframeUrls = await detectM3U8FromWebsite(iframeSrc, depth: depth + 1);
+              if (iframeUrls.isNotEmpty) {
+                print('Found ${iframeUrls.length} URL(s) in iframe');
+                urlSet.addAll(iframeUrls);
+              }
+            } catch (e) {
+              print('Failed to fetch iframe: $iframeSrc - $e');
+            }
+          } else {
+            print('Skipping ad domain: $iframeSrc');
           }
         }
       }
 
       // 2. scriptタグ内の動画URLを検索（複数パターン）
       final scripts = document.getElementsByTagName('script');
+      print('Found ${scripts.length} script tag(s)');
+      
       for (var script in scripts) {
         final content = script.text;
+        if (content.isEmpty) continue;
         
         // エスケープされたURLも検出（\/ を / に置換して検索）
         final unescapedContent = content.replaceAll(r'\/', '/');
@@ -91,6 +144,7 @@ class M3U8Parser {
             if (url != null && url.contains('.m3u8')) {
               final cleanUrl = _cleanUrl(url);
               if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+                print('Found M3U8 in script: $cleanUrl');
                 urlSet.add(cleanUrl);
               }
             }
@@ -112,6 +166,7 @@ class M3U8Parser {
             if (url != null && url.contains('.mp4')) {
               final cleanUrl = _cleanUrl(url);
               if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+                print('Found MP4 in script: $cleanUrl');
                 urlSet.add(cleanUrl);
               }
             }
@@ -163,9 +218,10 @@ class M3U8Parser {
 
       // 6. ページ全体のテキストから検索（fallback）
       if (urlSet.isEmpty) {
+        print('Searching entire page for video URLs...');
         final unescapedBody = bodyText.replaceAll(r'\/', '/');
         
-        // より広範囲な検索
+        // M3U8検索
         final allM3u8 = RegExp(r'https?://[^\s"<>\\]+\.m3u8[^\s"<>\\]*', caseSensitive: false)
             .allMatches(unescapedBody);
         for (var match in allM3u8) {
@@ -178,6 +234,7 @@ class M3U8Parser {
           }
         }
         
+        // MP4検索
         final allMp4 = RegExp(r'https?://[^\s"<>\\]+\.mp4[^\s"<>\\]*', caseSensitive: false)
             .allMatches(unescapedBody);
         for (var match in allMp4) {
@@ -186,6 +243,45 @@ class M3U8Parser {
             final cleanUrl = _cleanUrl(url);
             if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
               urlSet.add(cleanUrl);
+            }
+          }
+        }
+        
+        // MPD検索 (MPEG-DASH)
+        final allMpd = RegExp(r'https?://[^\s"<>\\]+\.mpd[^\s"<>\\]*', caseSensitive: false)
+            .allMatches(unescapedBody);
+        for (var match in allMpd) {
+          final url = match.group(0);
+          if (url != null) {
+            final cleanUrl = _cleanUrl(url);
+            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+              print('Found MPD URL: $cleanUrl');
+              urlSet.add(cleanUrl);
+            }
+          }
+        }
+      }
+
+      // 7. embedドメインや動画ホスティングサービスのURLを検出
+      final embedPatterns = [
+        RegExp(r'https?://[^/]*(?:embed|player|video)[^/]*/[^\s"<>]+', caseSensitive: false),
+        RegExp(r'https?://(?:www\.)?(?:youtube\.com|youtu\.be|vimeo\.com|dailymotion\.com)/[^\s"<>]+', caseSensitive: false),
+      ];
+      
+      for (var pattern in embedPatterns) {
+        final matches = pattern.allMatches(bodyText);
+        for (var match in matches) {
+          final url = match.group(0);
+          if (url != null && _isValidUrl(url)) {
+            print('Found embed URL: $url');
+            // embedページを再帰的に検索
+            if (depth < 2) {
+              try {
+                final embedUrls = await detectM3U8FromWebsite(url, depth: depth + 1);
+                urlSet.addAll(embedUrls);
+              } catch (e) {
+                print('Failed to fetch embed URL: $url - $e');
+              }
             }
           }
         }
@@ -227,6 +323,52 @@ class M3U8Parser {
     
     // URLの末尾の不要な文字を削除
     cleaned = cleaned.replaceAll(RegExp(r'[,;}\]]+$'), '');
+    
+    return cleaned;
+  }
+
+  // URLが有効かチェック
+  bool _isValidUrl(String url) {
+    if (url.isEmpty) return false;
+    
+    try {
+      final uri = Uri.parse(url);
+      return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // 広告ドメインかチェック
+  bool _isAdDomain(String url) {
+    final adDomains = [
+      'doubleclick.net',
+      'googlesyndication.com',
+      'googleadservices.com',
+      'adnxs.com',
+      'adsystem.com',
+      'advertising.com',
+      'exoclick.com',
+      'exosrv.com',
+      'trafficjunky.com',
+      'trafficjunky.net',
+      'clickadu.com',
+      'popads.net',
+      'popcash.net',
+      'adsterra.com',
+      'propellerads.com',
+      'myavlive.com', // 今回のケース
+      'juicyads.com',
+      'ads-display.com',
+    ];
+    
+    try {
+      final uri = Uri.parse(url);
+      return adDomains.any((ad) => uri.host.contains(ad));
+    } catch (e) {
+      return false;
+    }
+  }
     
     return cleaned;
   }
