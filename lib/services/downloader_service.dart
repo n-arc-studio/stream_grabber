@@ -151,6 +151,21 @@ class DownloaderService {
     
     while (retryCount < maxRetries) {
       try {
+        // ローカルファイルの場合はコピー
+        if (url.startsWith('file://')) {
+          final sourceFile = File(url.substring(7)); // file:// を削除
+          await sourceFile.copy(savePath);
+          return;
+        } else if (!url.startsWith('http://') && !url.startsWith('https://')) {
+          // http/httpsで始まらない場合はローカルファイルパスと見なす
+          final sourceFile = File(url);
+          if (await sourceFile.exists()) {
+            await sourceFile.copy(savePath);
+            return;
+          }
+        }
+
+        // HTTPダウンロード
         await _dio.download(
           url,
           savePath,

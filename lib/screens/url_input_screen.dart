@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:file_picker/file_picker.dart';
 import '../providers/download_provider.dart';
 import '../models/m3u8_stream.dart';
 
@@ -17,10 +18,12 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
   bool _isDetecting = false;
   List<String> _detectedUrls = [];
   String? _selectedM3u8Url;
+  String? _selectedLocalFilePath;
   List<M3U8Stream>? _availableStreams;
   M3U8Stream? _selectedStream;
   bool _isLoadingStreams = false;
   String _outputFormat = 'mp4';
+  bool _isLocalFile = false;
 
   @override
   void dispose() {
@@ -72,12 +75,14 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
   }
 
   Future<void> _loadAvailableStreams() async {
-    if (_selectedM3u8Url == null) return;
+    if (_selectedM3u8Url == null && _selectedLocalFilePath == null) return;
 
     setState(() => _isLoadingStreams = true);
 
     final provider = context.read<DownloadProvider>();
-    final streams = await provider.getAvailableStreams(_selectedM3u8Url!);
+    final streams = _isLocalFile
+        ? await provider.getAvailableLocalStreams(_selectedLocalFilePath!)
+        : await provider.getAvailableStreams(_selectedM3u8Url!);
 
     setState(() {
       _availableStreams = streams;
@@ -86,10 +91,38 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
     });
   }
 
+  Future<void> _pickLocalFile() async {
+    try {
+      FilePickerResult? result = await FilePicker.platform.pickFiles(
+        type: FileType.custom,
+        allowedExtensions: ['m3u8'],
+        dialogTitle: 'M3U8ファイルを選択',
+      );
+
+      if (result != null && result.files.single.path != null) {
+        setState(() {
+          _selectedLocalFilePath = result.files.single.path!;
+          _isLocalFile = true;
+          _detectedUrls = [];
+          _selectedM3u8Url = null;
+          _availableStreams = null;
+          _selectedStream = null;
+        });
+        _loadAvailableStreams();
+      }
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('ファイル選択エラー: $e')),
+        );
+      }
+    }
+  }
+
   Future<void> _addToQueue() async {
-    if (_selectedM3u8Url == null) {
+    if (_selectedM3u8Url == null && _selectedLocalFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('動画URLを選択してください')),
+        const SnackBar(content: Text('動画URLまたはファイルを選択してください')),
       );
       return;
     }
@@ -99,12 +132,21 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
         : '${_fileNameController.text.trim()}.$_outputFormat';
 
     final provider = context.read<DownloadProvider>();
-    await provider.addDownloadTask(
-      m3u8Url: _selectedM3u8Url!,
-      websiteUrl: _websiteController.text,
-      fileName: fileName,
-      selectedStream: _selectedStream,
-    );
+    
+    if (_isLocalFile && _selectedLocalFilePath != null) {
+      await provider.addLocalDownloadTask(
+        m3u8FilePath: _selectedLocalFilePath!,
+        fileName: fileName,
+        selectedStream: _selectedStream,
+      );
+    } else {
+      await provider.addDownloadTask(
+        m3u8Url: _selectedM3u8Url!,
+        websiteUrl: _websiteController.text,
+        fileName: fileName,
+        selectedStream: _selectedStream,
+      );
+    }
 
     if (mounted) {
       Navigator.pop(context);
@@ -162,8 +204,75 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                 ),
               ),
             ),
+
+            const SizedBox(height: 8),
+            Center(
+              child: Text(
+                'または',
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                  color: Colors.grey,
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'ローカルM3U8ファイルを選択',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                    const SizedBox(height: 12),
+                    if (_selectedLocalFilePath != null) ...[
+                      Container(
+                        padding: const EdgeInsets.all(12),
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.insert_drive_file, color: Colors.blue),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                _selectedLocalFilePath!,
+                                style: const TextStyle(fontSize: 12),
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, size: 18),
+                              onPressed: () {
+                                setState(() {
+                                  _selectedLocalFilePath = null;
+                                  _isLocalFile = false;
+                                  _availableStreams = null;
+                                  _selectedStream = null;
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    ElevatedButton.icon(
+                      onPressed: _pickLocalFile,
+                      icon: const Icon(Icons.folder_open),
+                      label: const Text('M3U8ファイルを選択'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
             
-            if (_detectedUrls.isNotEmpty) ...[
+            if (_detectedUrls.isNotEmpty && !_isLocalFile) ...[
               const SizedBox(height: 16),
               Card(
                 child: Padding(
@@ -235,7 +344,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
               ),
             ],
 
-            if (_selectedM3u8Url != null) ...[
+            if (_selectedM3u8Url != null || _selectedLocalFilePath != null) ...[
               const SizedBox(height: 16),
               Card(
                 child: Padding(

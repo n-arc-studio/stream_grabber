@@ -1,6 +1,7 @@
 import 'package:dio/dio.dart';
 import 'package:html/parser.dart' as html_parser;
 import '../models/m3u8_stream.dart';
+import 'dart:io';
 
 class M3U8Parser {
   final Dio _dio = Dio(
@@ -564,5 +565,179 @@ class M3U8Parser {
   // 訪問済みURLをクリア（新しい検索を開始する前に呼び出す）
   void clearVisitedUrls() {
     _visitedUrls.clear();
+  }
+
+  // ローカルM3U8ファイルを解析
+  Future<M3U8Stream> parseLocalM3U8(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw Exception('ファイルが存在しません: $filePath');
+      }
+
+      final content = await file.readAsString();
+      final lines = content.split('\n').map((line) => line.trim()).toList();
+
+      // マスタープレイリストかどうかを確認
+      final isMasterPlaylist = lines.any((line) => line.startsWith('#EXT-X-STREAM-INF'));
+
+      if (isMasterPlaylist) {
+        // マスタープレイリストの場合、最高品質のストリームを選択
+        return _parseLocalMasterPlaylist(filePath, lines);
+      } else {
+        // メディアプレイリストの場合、セグメントURLを抽出
+        return _parseLocalMediaPlaylist(filePath, lines);
+      }
+    } catch (e) {
+      print('Error parsing local M3U8: $e');
+      rethrow;
+    }
+  }
+
+  M3U8Stream _parseLocalMasterPlaylist(String baseFilePath, List<String> lines) {
+    int maxBandwidth = 0;
+    String? bestQualityUrl;
+    String? resolution;
+
+    for (int i = 0; i < lines.length; i++) {
+      if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+        final info = lines[i];
+        final bandwidthMatch = RegExp(r'BANDWIDTH=(\d+)').firstMatch(info);
+        final resolutionMatch = RegExp(r'RESOLUTION=([\d]+x[\d]+)').firstMatch(info);
+
+        if (bandwidthMatch != null) {
+          final bandwidth = int.parse(bandwidthMatch.group(1)!);
+          if (bandwidth > maxBandwidth) {
+            maxBandwidth = bandwidth;
+            resolution = resolutionMatch?.group(1);
+            
+            // 次の行がURL
+            if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+              bestQualityUrl = _resolveLocalUrl(baseFilePath, lines[i + 1]);
+            }
+          }
+        }
+      }
+    }
+
+    return M3U8Stream(
+      url: bestQualityUrl ?? baseFilePath,
+      quality: 'Best',
+      bandwidth: maxBandwidth,
+      resolution: resolution,
+    );
+  }
+
+  Future<M3U8Stream> _parseLocalMediaPlaylist(String baseFilePath, List<String> lines) async {
+    final List<String> segmentUrls = [];
+    bool isEncrypted = false;
+    String? keyUri;
+
+    for (int i = 0; i < lines.length; i++) {
+      final line = lines[i];
+
+      if (line.startsWith('#EXT-X-KEY')) {
+        isEncrypted = true;
+        final uriMatch = RegExp(r'URI="([^"]+)"').firstMatch(line);
+        if (uriMatch != null) {
+          keyUri = _resolveLocalUrl(baseFilePath, uriMatch.group(1)!);
+        }
+      }
+
+      if (!line.startsWith('#') && line.isNotEmpty) {
+        final segmentUrl = _resolveLocalUrl(baseFilePath, line);
+        segmentUrls.add(segmentUrl);
+      }
+    }
+
+    return M3U8Stream(
+      url: baseFilePath,
+      quality: 'Standard',
+      segmentUrls: segmentUrls,
+      isEncrypted: isEncrypted,
+      keyUri: keyUri,
+    );
+  }
+
+  String _resolveLocalUrl(String baseFilePath, String relativeUrl) {
+    // 絶対URLの場合はそのまま返す
+    if (relativeUrl.startsWith('http://') || 
+        relativeUrl.startsWith('https://') ||
+        relativeUrl.startsWith('file://')) {
+      return relativeUrl;
+    }
+
+    // Windowsの絶対パス
+    if (relativeUrl.contains(':') && relativeUrl.indexOf(':') == 1) {
+      return relativeUrl;
+    }
+
+    // Unix/Linuxの絶対パス
+    if (relativeUrl.startsWith('/') && !Platform.isWindows) {
+      return relativeUrl;
+    }
+
+    // 相対パスの場合、baseFilePathのディレクトリを基準に解決
+    final baseDir = File(baseFilePath).parent.path;
+    
+    if (relativeUrl.startsWith('/')) {
+      // ルート相対パス（ローカルファイルでは使用しない）
+      return '$baseDir$relativeUrl';
+    } else {
+      // 相対パス
+      return '$baseDir${Platform.pathSeparator}$relativeUrl';
+    }
+  }
+
+  // すべての利用可能なローカルストリーム品質を取得
+  Future<List<M3U8Stream>> getAllLocalStreams(String filePath) async {
+    try {
+      final file = File(filePath);
+      if (!await file.exists()) {
+        throw Exception('ファイルが存在しません: $filePath');
+      }
+
+      final content = await file.readAsString();
+      final lines = content.split('\n').map((line) => line.trim()).toList();
+
+      final isMasterPlaylist = lines.any((line) => line.startsWith('#EXT-X-STREAM-INF'));
+
+      if (!isMasterPlaylist) {
+        // メディアプレイリストの場合、1つだけ返す
+        final stream = await parseLocalM3U8(filePath);
+        return [stream];
+      }
+
+      final List<M3U8Stream> streams = [];
+
+      for (int i = 0; i < lines.length; i++) {
+        if (lines[i].startsWith('#EXT-X-STREAM-INF')) {
+          final info = lines[i];
+          final bandwidthMatch = RegExp(r'BANDWIDTH=(\d+)').firstMatch(info);
+          final resolutionMatch = RegExp(r'RESOLUTION=([\d]+x[\d]+)').firstMatch(info);
+
+          if (i + 1 < lines.length && !lines[i + 1].startsWith('#')) {
+            final streamUrl = _resolveLocalUrl(filePath, lines[i + 1]);
+            
+            streams.add(M3U8Stream(
+              url: streamUrl,
+              quality: resolutionMatch?.group(1) ?? 'Unknown',
+              bandwidth: bandwidthMatch != null 
+                  ? int.parse(bandwidthMatch.group(1)!) 
+                  : null,
+              resolution: resolutionMatch?.group(1),
+            ));
+          }
+        }
+      }
+
+      // 帯域幅でソート（高い順）
+      streams.sort((a, b) => (b.bandwidth ?? 0).compareTo(a.bandwidth ?? 0));
+
+      return streams;
+    } catch (e) {
+      print('Error getting all local streams: $e');
+      return [];
+    }
   }
 }

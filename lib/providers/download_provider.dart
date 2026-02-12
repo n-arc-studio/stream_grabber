@@ -112,6 +112,72 @@ class DownloadProvider extends ChangeNotifier {
     }
   }
 
+  // ローカルM3U8ファイルから利用可能なストリームを取得
+  Future<List<M3U8Stream>> getAvailableLocalStreams(String filePath) async {
+    try {
+      return await _m3u8Parser.getAllLocalStreams(filePath);
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      return [];
+    }
+  }
+
+  // ローカルM3U8ファイルからダウンロードタスクを追加
+  Future<void> addLocalDownloadTask({
+    required String m3u8FilePath,
+    String? fileName,
+    M3U8Stream? selectedStream,
+  }) async {
+    try {
+      final downloadDir = await _downloaderService.getDownloadDirectory();
+      final id = DateTime.now().millisecondsSinceEpoch.toString();
+      final name = fileName ?? 'video_$id.mp4';
+
+      final task = DownloadTask(
+        id: id,
+        url: m3u8FilePath, // ローカルファイルパスをurlとして保存
+        websiteUrl: 'local://$m3u8FilePath', // ローカルファイルであることを示す
+        outputPath: downloadDir,
+        fileName: name,
+      );
+
+      await _dbService.insertTask(task);
+      _tasks.insert(0, task);
+      notifyListeners();
+
+      // 自動ダウンロード開始
+      await startLocalDownload(task.id, selectedStream: selectedStream);
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+    }
+  }
+
+  // ローカルM3U8ファイルからダウンロード開始
+  Future<void> startLocalDownload(String taskId, {M3U8Stream? selectedStream}) async {
+    final taskIndex = _tasks.indexWhere((t) => t.id == taskId);
+    if (taskIndex == -1) return;
+
+    final task = _tasks[taskIndex];
+    task.status = DownloadStatus.downloading;
+    await _dbService.updateTask(task);
+    notifyListeners();
+
+    try {
+      // ローカルM3U8ファイルを解析
+      M3U8Stream stream = selectedStream ?? await _m3u8Parser.parseLocalM3U8(task.url);
+      
+      // 並列ダウンロードを使用（ローカルファイルの場合はコピー）
+      await _downloaderService.downloadM3U8Parallel(task, stream);
+    } catch (e) {
+      task.status = DownloadStatus.failed;
+      task.errorMessage = e.toString();
+      await _dbService.updateTask(task);
+      notifyListeners();
+    }
+  }
+
   Future<void> addDownloadTask({
     required String m3u8Url,
     required String websiteUrl,

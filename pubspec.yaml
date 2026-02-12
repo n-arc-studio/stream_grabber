@@ -49,6 +49,9 @@ dependencies:
   sqflite_common_ffi: ^2.3.0
   shared_preferences: ^2.2.2
   
+  # File picker
+  file_picker: ^8.1.6
+  
   # Path utilities
   path_provider: ^2.1.1
   path: ^1.8.3
