@@ -79,9 +79,9 @@ class M3U8Parser {
         // M3U8 URLを検索（より柔軟なパターン）
         final m3u8Patterns = [
           RegExp(r'https?://[^\s"<>\\]+\.m3u8[^\s"<>\\]*', caseSensitive: false),
-          RegExp(r'["\']([^"\']*\.m3u8[^"\']*)["\']', caseSensitive: false),
-          RegExp(r'file["\s]*:["\s]*["\']([^"\']*\.m3u8[^"\']*)["\']', caseSensitive: false),
-          RegExp(r'source["\s]*:["\s]*["\']([^"\']*\.m3u8[^"\']*)["\']', caseSensitive: false),
+          RegExp(r'''["']([^"']*\.m3u8[^"']*)["']''', caseSensitive: false),
+          RegExp(r'''file["\s]*:["\s]*["']([^"']*\.m3u8[^"']*)["']''', caseSensitive: false),
+          RegExp(r'''source["\s]*:["\s]*["']([^"']*\.m3u8[^"']*)["']''', caseSensitive: false),
         ];
         
         for (var pattern in m3u8Patterns) {
@@ -100,9 +100,9 @@ class M3U8Parser {
         // MP4 URLを検索
         final mp4Patterns = [
           RegExp(r'https?://[^\s"<>\\]+\.mp4[^\s"<>\\]*', caseSensitive: false),
-          RegExp(r'["\']([^"\']*\.mp4[^"\']*)["\']', caseSensitive: false),
-          RegExp(r'file["\s]*:["\s]*["\']([^"\']*\.mp4[^"\']*)["\']', caseSensitive: false),
-          RegExp(r'source["\s]*:["\s]*["\']([^"\']*\.mp4[^"\']*)["\']', caseSensitive: false),
+          RegExp(r'''["']([^"']*\.mp4[^"']*)["']''', caseSensitive: false),
+          RegExp(r'''file["\s]*:["\s]*["']([^"']*\.mp4[^"']*)["']''', caseSensitive: false),
+          RegExp(r'''source["\s]*:["\s]*["']([^"']*\.mp4[^"']*)["']''', caseSensitive: false),
         ];
         
         for (var pattern in mp4Patterns) {
