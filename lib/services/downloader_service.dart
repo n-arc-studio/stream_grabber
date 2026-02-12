@@ -228,7 +228,7 @@ class DownloaderService {
               await file.delete();
             }
           } catch (e) {
-            print('Warning: Failed to delete file ${file.path}: $e');
+            // Ignore individual file deletion errors
           }
         }
 
@@ -237,14 +237,11 @@ class DownloaderService {
 
         // ディレクトリを削除
         await tempDir.delete(recursive: true);
-        print('Successfully cleaned up temp files for task $taskId');
         return;
       } catch (e) {
         retryCount++;
-        print('Warning: Failed to cleanup temp files (attempt $retryCount/$maxRetries): $e');
         
         if (retryCount >= maxRetries) {
-          print('Error: Could not delete temp directory after $maxRetries attempts. Path: ${tempDir.path}');
           // 削除に失敗してもエラーを投げずに続行
           return;
         }

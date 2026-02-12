@@ -36,7 +36,6 @@ class M3U8Parser {
   Future<List<String>> detectM3U8FromWebsite(String websiteUrl, {int depth = 0}) async {
     // 深さ制限（無限ループ防止）
     if (depth > 2) {
-      print('Max depth reached for: $websiteUrl');
       return [];
     }
 
@@ -47,8 +46,6 @@ class M3U8Parser {
     _visitedUrls.add(websiteUrl);
 
     try {
-      print('Fetching URL: $websiteUrl (depth: $depth)');
-      
       // まずリダイレクトなしで取得を試みる
       Response response;
       try {
@@ -65,7 +62,6 @@ class M3U8Parser {
         );
       } catch (e) {
         // リダイレクトエラーの場合、通常通り取得
-        print('Retry with redirects enabled');
         response = await _dio.get(
           websiteUrl,
           options: Options(
@@ -79,24 +75,17 @@ class M3U8Parser {
       final document = html_parser.parse(response.data);
       final bodyText = response.data.toString();
       
-      print('Response status: ${response.statusCode}');
-      print('Content length: ${bodyText.length}');
-      print('Final URL: ${response.realUri}');
-      
       final List<String> videoUrls = [];
       final Set<String> urlSet = {}; // 重複除去用
 
       // 1. iframeのsrc属性を検索（埋め込み動画）
       final iframes = document.getElementsByTagName('iframe');
-      print('Found ${iframes.length} iframe(s)');
       
       for (var iframe in iframes) {
         final src = iframe.attributes['src'] ?? 
                     iframe.attributes['data-src'] ?? 
                     iframe.attributes['data-lazy-src'];
         if (src != null && src.isNotEmpty) {
-          print('iframe src: $src');
-          
           // 相対URLを絶対URLに変換
           String iframeSrc = src;
           if (!src.startsWith('http')) {
@@ -113,17 +102,13 @@ class M3U8Parser {
           // 広告ドメインをスキップ
           if (!_isAdDomain(iframeSrc)) {
             try {
-              print('Fetching iframe content: $iframeSrc');
               final iframeUrls = await detectM3U8FromWebsite(iframeSrc, depth: depth + 1);
               if (iframeUrls.isNotEmpty) {
-                print('Found ${iframeUrls.length} URL(s) in iframe');
                 urlSet.addAll(iframeUrls);
               }
             } catch (e) {
-              print('Failed to fetch iframe: $iframeSrc - $e');
+              // Ignore iframe fetch errors
             }
-          } else {
-            print('Skipping ad domain: $iframeSrc');
           }
         }
       }
@@ -154,7 +139,6 @@ class M3U8Parser {
             if (url != null && url.contains('.m3u8')) {
               final cleanUrl = _cleanUrl(url);
               if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-                print('Found M3U8 in script: $cleanUrl');
                 urlSet.add(cleanUrl);
               }
             }
@@ -176,7 +160,6 @@ class M3U8Parser {
             if (url != null && url.contains('.mp4')) {
               final cleanUrl = _cleanUrl(url);
               if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-                print('Found MP4 in script: $cleanUrl');
                 urlSet.add(cleanUrl);
               }
             }
@@ -228,7 +211,6 @@ class M3U8Parser {
 
       // 6. ページ全体のテキストから検索（fallback）
       if (urlSet.isEmpty) {
-        print('Searching entire page for video URLs...');
         final unescapedBody = bodyText.replaceAll(r'\/', '/');
         
         // M3U8検索
@@ -265,7 +247,6 @@ class M3U8Parser {
           if (url != null) {
             final cleanUrl = _cleanUrl(url);
             if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-              print('Found MPD URL: $cleanUrl');
               urlSet.add(cleanUrl);
             }
           }
@@ -283,14 +264,13 @@ class M3U8Parser {
         for (var match in matches) {
           final url = match.group(0);
           if (url != null && _isValidUrl(url)) {
-            print('Found embed URL: $url');
             // embedページを再帰的に検索
             if (depth < 2) {
               try {
                 final embedUrls = await detectM3U8FromWebsite(url, depth: depth + 1);
                 urlSet.addAll(embedUrls);
               } catch (e) {
-                print('Failed to fetch embed URL: $url - $e');
+                // Ignore embed fetch errors
               }
             }
           }
@@ -299,14 +279,6 @@ class M3U8Parser {
 
       videoUrls.addAll(urlSet);
       
-      // デバッグ情報
-      if (videoUrls.isEmpty) {
-        print('No video URLs found on page: $websiteUrl');
-        print('Page title: ${document.querySelector('title')?.text ?? 'N/A'}');
-      } else {
-        print('Found ${videoUrls.length} video URL(s)');
-      }
-
       return videoUrls;
     } on DioException catch (e) {
       if (e.response?.statusCode == 403) {
@@ -412,18 +384,7 @@ class M3U8Parser {
         // メディアプレイリストの場合、セグメントURLを抽出
         return _parseMediaPlaylist(m3u8Url, lines);
       }
-    } on DioException catch (e) {
-      if (e.response?.statusCode == 403) {
-        throw Exception('アクセスが拒否されました (403)。このストリームは認証が必要か、アクセスが制限されている可能性があります。');
-      } else if (e.response?.statusCode == 404) {
-        throw Exception('M3U8ファイルが見つかりません (404)。URLを確認してください。');
-      } else if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
-        throw Exception('接続タイムアウト。ネットワーク接続を確認してください。');
-      } else {
-        throw Exception('M3U8の解析に失敗しました: ${e.message}');
-      }
     } catch (e) {
-      print('Error parsing M3U8: $e');
       rethrow;
     }
   }
@@ -570,8 +531,6 @@ class M3U8Parser {
   // ローカルM3U8ファイルを解析
   Future<M3U8Stream> parseLocalM3U8(String filePath) async {
     try {
-      print('Parsing local M3U8 file: $filePath');
-      
       final file = File(filePath);
       if (!await file.exists()) {
         throw Exception('ファイルが存在しません: $filePath');
@@ -582,7 +541,6 @@ class M3U8Parser {
         throw Exception('ファイルが空です: $filePath');
       }
 
-      print('File content length: ${content.length}');
       final lines = content.split('\n').map((line) => line.trim()).toList();
 
       // M3U8ファイルかどうかを確認
@@ -592,7 +550,6 @@ class M3U8Parser {
 
       // マスタープレイリストかどうかを確認
       final isMasterPlaylist = lines.any((line) => line.startsWith('#EXT-X-STREAM-INF'));
-      print('Is master playlist: $isMasterPlaylist');
 
       if (isMasterPlaylist) {
         // マスタープレイリストの場合、最高品質のストリームを選択
@@ -602,11 +559,8 @@ class M3U8Parser {
         return await _parseLocalMediaPlaylist(filePath, lines);
       }
     } on FileSystemException catch (e) {
-      print('File system error: $e');
       throw Exception('ファイル読み込みエラー: ${e.message}');
-    } catch (e, stackTrace) {
-      print('Error parsing local M3U8: $e');
-      print('Stack trace: $stackTrace');
+    } catch (e) {
       throw Exception('M3U8の解析に失敗しました: ${e.toString()}');
     }
   }
@@ -638,10 +592,6 @@ class M3U8Parser {
         }
       }
 
-      if (bestQualityUrl == null) {
-        print('Warning: No quality URL found in master playlist, using base file path');
-      }
-
       return M3U8Stream(
         url: bestQualityUrl ?? baseFilePath,
         quality: 'Best',
@@ -649,7 +599,6 @@ class M3U8Parser {
         resolution: resolution,
       );
     } catch (e) {
-      print('Error parsing local master playlist: $e');
       throw Exception('マスタープレイリストの解析に失敗しました: $e');
     }
   }
@@ -677,13 +626,8 @@ class M3U8Parser {
         }
       }
 
-      print('Found ${segmentUrls.length} segments in media playlist');
       if (segmentUrls.isEmpty) {
         throw Exception('セグメントが見つかりませんでした。M3U8ファイルの形式を確認してください。');
-      }
-
-      if (isEncrypted) {
-        print('Warning: Stream is encrypted');
       }
 
       return M3U8Stream(
@@ -732,8 +676,6 @@ class M3U8Parser {
   // すべての利用可能なローカルストリーム品質を取得
   Future<List<M3U8Stream>> getAllLocalStreams(String filePath) async {
     try {
-      print('Getting all local streams from: $filePath');
-      
       final file = File(filePath);
       if (!await file.exists()) {
         throw Exception('ファイルが存在しません: $filePath');
@@ -743,7 +685,6 @@ class M3U8Parser {
       final lines = content.split('\n').map((line) => line.trim()).toList();
 
       final isMasterPlaylist = lines.any((line) => line.startsWith('#EXT-X-STREAM-INF'));
-      print('Is master playlist: $isMasterPlaylist');
 
       if (!isMasterPlaylist) {
         // メディアプレイリストの場合、1つだけ返す
@@ -777,11 +718,8 @@ class M3U8Parser {
       // 帯域幅でソート（高い順）
       streams.sort((a, b) => (b.bandwidth ?? 0).compareTo(a.bandwidth ?? 0));
 
-      print('Found ${streams.length} streams');
       return streams;
-    } catch (e, stackTrace) {
-      print('Error getting all local streams: $e');
-      print('Stack trace: $stackTrace');
+    } catch (e) {
       rethrow;
     }
   }

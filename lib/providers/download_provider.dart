@@ -131,7 +131,6 @@ class DownloadProvider extends ChangeNotifier {
     try {
       return await _m3u8Parser.getAllLocalStreams(filePath);
     } catch (e) {
-      print('Error in getAvailableLocalStreams: $e');
       _error = e.toString().replaceAll('Exception: ', '');
       notifyListeners();
       return [];
@@ -180,18 +179,12 @@ class DownloadProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      print('Starting local download for task: ${task.id}');
-      print('Local file path: ${task.url}');
-      
       // ローカルM3U8ファイルを解析
       M3U8Stream stream = selectedStream ?? await _m3u8Parser.parseLocalM3U8(task.url);
-      print('Stream parsed successfully: ${stream.segmentUrls.length} segments');
       
       // 並列ダウンロードを使用（ローカルファイルの場合はコピー）
       await _downloaderService.downloadM3U8Parallel(task, stream);
-    } catch (e, stackTrace) {
-      print('Error in startLocalDownload: $e');
-      print('Stack trace: $stackTrace');
+    } catch (e) {
       task.status = DownloadStatus.failed;
       task.errorMessage = e.toString().replaceAll('Exception: ', '');
       await _dbService.updateTask(task);
@@ -294,8 +287,7 @@ class DownloadProvider extends ChangeNotifier {
         try {
           await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
         } catch (e) {
-          print('Warning: Failed to cleanup temp files: $e');
-          // 削除に失敗してもタスクは完了として扱う
+          // Ignore cleanup errors
         }
         
         notifyListeners();
@@ -348,7 +340,7 @@ class DownloadProvider extends ChangeNotifier {
     try {
       await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
     } catch (e) {
-      print('Warning: Failed to cleanup temp files during task deletion: $e');
+      // Ignore cleanup errors
     }
     
     // 出力ファイル削除（完了済みの場合）
@@ -359,7 +351,7 @@ class DownloadProvider extends ChangeNotifier {
           await outputFile.delete();
         }
       } catch (e) {
-        print('Warning: Failed to delete output file: $e');
+        // Ignore file deletion errors
       }
     }
 
