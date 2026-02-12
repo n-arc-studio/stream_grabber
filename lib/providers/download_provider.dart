@@ -92,6 +92,8 @@ class DownloadProvider extends ChangeNotifier {
 
   Future<List<String>> detectM3U8FromWebsite(String websiteUrl) async {
     try {
+      // 訪問済みURLをクリア（新しい検索を開始）
+      _m3u8Parser.clearVisitedUrls();
       return await _m3u8Parser.detectM3U8FromWebsite(websiteUrl);
     } catch (e) {
       _error = e.toString();

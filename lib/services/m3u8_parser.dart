@@ -19,8 +19,23 @@ class M3U8Parser {
     ),
   );
 
+  // 訪問済みURLを追跡（循環参照を防ぐ）
+  final Set<String> _visitedUrls = {};
+
   // WebページからM3U8およびMP4 URLを検出
-  Future<List<String>> detectM3U8FromWebsite(String websiteUrl) async {
+  Future<List<String>> detectM3U8FromWebsite(String websiteUrl, {int depth = 0}) async {
+    // 深さ制限（無限ループ防止）
+    if (depth > 2) {
+      print('Max depth reached for: $websiteUrl');
+      return [];
+    }
+
+    // 訪問済みURLチェック（循環参照防止）
+    if (_visitedUrls.contains(websiteUrl)) {
+      return [];
+    }
+    _visitedUrls.add(websiteUrl);
+
     try {
       final response = await _dio.get(
         websiteUrl,
@@ -31,76 +46,159 @@ class M3U8Parser {
         ),
       );
       final document = html_parser.parse(response.data);
+      final bodyText = response.data.toString();
       
       final List<String> videoUrls = [];
+      final Set<String> urlSet = {}; // 重複除去用
 
-      // scriptタグ内のM3U8/MP4 URLを検索
+      // 1. iframeのsrc属性を検索（埋め込み動画）
+      final iframes = document.getElementsByTagName('iframe');
+      for (var iframe in iframes) {
+        final src = iframe.attributes['src'] ?? iframe.attributes['data-src'];
+        if (src != null && src.isNotEmpty) {
+          // iframeの中身を取得してみる
+          if (src.startsWith('http')) {
+            try {
+              final iframeUrls = await detectM3U8FromWebsite(src, depth: depth + 1);
+              urlSet.addAll(iframeUrls);
+            } catch (e) {
+              print('Failed to fetch iframe: $src - $e');
+            }
+          }
+        }
+      }
+
+      // 2. scriptタグ内の動画URLを検索（複数パターン）
       final scripts = document.getElementsByTagName('script');
       for (var script in scripts) {
         final content = script.text;
-        // M3U8 URLを検索
-        final m3u8Matches = RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*')
-            .allMatches(content);
-        for (var match in m3u8Matches) {
-          final url = match.group(0);
-          if (url != null && !videoUrls.contains(url)) {
-            videoUrls.add(url);
+        
+        // エスケープされたURLも検出（\/ を / に置換して検索）
+        final unescapedContent = content.replaceAll(r'\/', '/');
+        
+        // M3U8 URLを検索（より柔軟なパターン）
+        final m3u8Patterns = [
+          RegExp(r'https?://[^\s"<>\\]+\.m3u8[^\s"<>\\]*', caseSensitive: false),
+          RegExp(r'["\']([^"\']*\.m3u8[^"\']*)["\']', caseSensitive: false),
+          RegExp(r'file["\s]*:["\s]*["\']([^"\']*\.m3u8[^"\']*)["\']', caseSensitive: false),
+          RegExp(r'source["\s]*:["\s]*["\']([^"\']*\.m3u8[^"\']*)["\']', caseSensitive: false),
+        ];
+        
+        for (var pattern in m3u8Patterns) {
+          final matches = pattern.allMatches(unescapedContent);
+          for (var match in matches) {
+            final url = match.group(1) ?? match.group(0);
+            if (url != null && url.contains('.m3u8')) {
+              final cleanUrl = _cleanUrl(url);
+              if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+                urlSet.add(cleanUrl);
+              }
+            }
           }
         }
+        
         // MP4 URLを検索
-        final mp4Matches = RegExp(r'https?://[^\s"<>]+\.mp4[^\s"<>]*')
-            .allMatches(content);
-        for (var match in mp4Matches) {
-          final url = match.group(0);
-          if (url != null && !videoUrls.contains(url)) {
-            videoUrls.add(url);
+        final mp4Patterns = [
+          RegExp(r'https?://[^\s"<>\\]+\.mp4[^\s"<>\\]*', caseSensitive: false),
+          RegExp(r'["\']([^"\']*\.mp4[^"\']*)["\']', caseSensitive: false),
+          RegExp(r'file["\s]*:["\s]*["\']([^"\']*\.mp4[^"\']*)["\']', caseSensitive: false),
+          RegExp(r'source["\s]*:["\s]*["\']([^"\']*\.mp4[^"\']*)["\']', caseSensitive: false),
+        ];
+        
+        for (var pattern in mp4Patterns) {
+          final matches = pattern.allMatches(unescapedContent);
+          for (var match in matches) {
+            final url = match.group(1) ?? match.group(0);
+            if (url != null && url.contains('.mp4')) {
+              final cleanUrl = _cleanUrl(url);
+              if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+                urlSet.add(cleanUrl);
+              }
+            }
           }
         }
       }
 
-      // videoタグのsrc属性を検索
+      // 3. videoタグのsrc属性を検索
       final videos = document.getElementsByTagName('video');
       for (var video in videos) {
-        final src = video.attributes['src'];
+        final src = video.attributes['src'] ?? video.attributes['data-src'];
         if (src != null && (src.contains('.m3u8') || src.contains('.mp4'))) {
-          if (!videoUrls.contains(src)) {
-            videoUrls.add(src);
+          final cleanUrl = _cleanUrl(src);
+          if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+            urlSet.add(cleanUrl);
           }
         }
       }
 
-      // sourceタグを検索
+      // 4. sourceタグを検索
       final sources = document.getElementsByTagName('source');
       for (var source in sources) {
-        final src = source.attributes['src'];
+        final src = source.attributes['src'] ?? source.attributes['data-src'];
         if (src != null && (src.contains('.m3u8') || src.contains('.mp4'))) {
-          if (!videoUrls.contains(src)) {
-            videoUrls.add(src);
+          final cleanUrl = _cleanUrl(src);
+          if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+            urlSet.add(cleanUrl);
           }
         }
       }
 
-      // ページ全体のテキストからM3U8/MP4 URLを検索（fallback）
+      // 5. data-*属性からURLを検索
+      final allElements = document.querySelectorAll('[data-video], [data-src], [data-source], [data-url]');
+      for (var element in allElements) {
+        final dataVideo = element.attributes['data-video'];
+        final dataSrc = element.attributes['data-src'];
+        final dataSource = element.attributes['data-source'];
+        final dataUrl = element.attributes['data-url'];
+        
+        for (var attr in [dataVideo, dataSrc, dataSource, dataUrl]) {
+          if (attr != null && (attr.contains('.m3u8') || attr.contains('.mp4'))) {
+            final cleanUrl = _cleanUrl(attr);
+            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+              urlSet.add(cleanUrl);
+            }
+          }
+        }
+      }
+
+      // 6. ページ全体のテキストから検索（fallback）
+      if (urlSet.isEmpty) {
+        final unescapedBody = bodyText.replaceAll(r'\/', '/');
+        
+        // より広範囲な検索
+        final allM3u8 = RegExp(r'https?://[^\s"<>\\]+\.m3u8[^\s"<>\\]*', caseSensitive: false)
+            .allMatches(unescapedBody);
+        for (var match in allM3u8) {
+          final url = match.group(0);
+          if (url != null) {
+            final cleanUrl = _cleanUrl(url);
+            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+              urlSet.add(cleanUrl);
+            }
+          }
+        }
+        
+        final allMp4 = RegExp(r'https?://[^\s"<>\\]+\.mp4[^\s"<>\\]*', caseSensitive: false)
+            .allMatches(unescapedBody);
+        for (var match in allMp4) {
+          final url = match.group(0);
+          if (url != null) {
+            final cleanUrl = _cleanUrl(url);
+            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
+              urlSet.add(cleanUrl);
+            }
+          }
+        }
+      }
+
+      videoUrls.addAll(urlSet);
+      
+      // デバッグ情報
       if (videoUrls.isEmpty) {
-        final bodyText = response.data.toString();
-        // M3U8 URLを検索
-        final m3u8Matches = RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*')
-            .allMatches(bodyText);
-        for (var match in m3u8Matches) {
-          final url = match.group(0);
-          if (url != null && !videoUrls.contains(url)) {
-            videoUrls.add(url);
-          }
-        }
-        // MP4 URLを検索
-        final mp4Matches = RegExp(r'https?://[^\s"<>]+\.mp4[^\s"<>]*')
-            .allMatches(bodyText);
-        for (var match in mp4Matches) {
-          final url = match.group(0);
-          if (url != null && !videoUrls.contains(url)) {
-            videoUrls.add(url);
-          }
-        }
+        print('No video URLs found on page: $websiteUrl');
+        print('Page title: ${document.querySelector('title')?.text ?? 'N/A'}');
+      } else {
+        print('Found ${videoUrls.length} video URL(s)');
       }
 
       return videoUrls;
@@ -116,6 +214,32 @@ class M3U8Parser {
     } catch (e) {
       print('Error detecting video URLs: $e');
       return [];
+    }
+  }
+
+  // URLをクリーンアップ
+  String _cleanUrl(String url) {
+    // 前後の空白や引用符を削除
+    var cleaned = url.trim().replaceAll('"', '').replaceAll("'", '');
+    
+    // エスケープされたスラッシュを戻す
+    cleaned = cleaned.replaceAll(r'\/', '/');
+    
+    // URLの末尾の不要な文字を削除
+    cleaned = cleaned.replaceAll(RegExp(r'[,;}\]]+$'), '');
+    
+    return cleaned;
+  }
+
+  // URLが有効かチェック
+  bool _isValidUrl(String url) {
+    if (url.isEmpty) return false;
+    
+    try {
+      final uri = Uri.parse(url);
+      return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
+    } catch (e) {
+      return false;
     }
   }
 
@@ -291,5 +415,10 @@ class M3U8Parser {
       print('Error getting all streams: $e');
       return [];
     }
+  }
+
+  // 訪問済みURLをクリア（新しい検索を開始する前に呼び出す）
+  void clearVisitedUrls() {
+    _visitedUrls.clear();
   }
 }
