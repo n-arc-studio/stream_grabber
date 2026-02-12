@@ -47,7 +47,21 @@ class DownloadProvider extends ChangeNotifier {
     };
 
     _downloaderService.onCompleted = (taskId) {
-      _startMerging(taskId);
+      final taskIndex = _tasks.indexWhere((t) => t.id == taskId);
+      if (taskIndex != -1) {
+        final task = _tasks[taskIndex];
+        // MP4の場合はマージ不要
+        if (task.url.toLowerCase().contains('.mp4')) {
+          task.status = DownloadStatus.completed;
+          task.progress = 1.0;
+          task.completedAt = DateTime.now();
+          _dbService.updateTask(task);
+          notifyListeners();
+        } else {
+          // M3U8の場合はマージ処理へ
+          _startMerging(taskId);
+        }
+      }
     };
 
     _downloaderService.onError = (taskId, error) {
@@ -137,10 +151,17 @@ class DownloadProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      M3U8Stream stream = selectedStream ?? await _m3u8Parser.parseM3U8(task.url);
-      
-      // 並列ダウンロードを使用
-      await _downloaderService.downloadM3U8Parallel(task, stream);
+      // URLがMP4かM3U8かを判別
+      if (task.url.toLowerCase().contains('.mp4')) {
+        // MP4の直接ダウンロード
+        await _downloaderService.downloadMP4(task, task.url);
+      } else {
+        // M3U8のダウンロード
+        M3U8Stream stream = selectedStream ?? await _m3u8Parser.parseM3U8(task.url);
+        
+        // 並列ダウンロードを使用
+        await _downloaderService.downloadM3U8Parallel(task, stream);
+      }
     } catch (e) {
       task.status = DownloadStatus.failed;
       task.errorMessage = e.toString();

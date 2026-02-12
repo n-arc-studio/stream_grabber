@@ -39,6 +39,56 @@ class DownloaderService {
     return downloadDir.path;
   }
 
+  // MP4ファイルの直接ダウンロード
+  Future<void> downloadMP4(DownloadTask task, String mp4Url) async {
+    try {
+      task.totalSegments = 1;
+      task.downloadedSegments = 0;
+
+      final outputFile = '${task.outputPath}/${task.fileName}';
+      
+      await _dio.download(
+        mp4Url,
+        outputFile,
+        options: Options(
+          headers: {
+            'Referer': mp4Url,
+            'Origin': Uri.parse(mp4Url).origin,
+          },
+          receiveTimeout: const Duration(minutes: 30),
+          sendTimeout: const Duration(seconds: 30),
+        ),
+        onReceiveProgress: (received, total) {
+          if (total != -1) {
+            task.progress = received / total;
+            onProgress?.call(task.id, task.progress, 0);
+          }
+        },
+      );
+
+      task.downloadedSegments = 1;
+      task.progress = 1.0;
+      onProgress?.call(task.id, task.progress, task.downloadedSegments);
+      onCompleted?.call(task.id);
+    } on DioException catch (e) {
+      String errorMessage;
+      if (e.response?.statusCode == 403) {
+        errorMessage = 'アクセスが拒否されました (403)。このファイルはダウンロードが制限されている可能性があります。';
+      } else if (e.response?.statusCode == 404) {
+        errorMessage = 'ファイルが見つかりません (404)。URLを確認してください。';
+      } else if (e.type == DioExceptionType.connectionTimeout || e.type == DioExceptionType.receiveTimeout) {
+        errorMessage = '接続タイムアウト。ネットワーク接続を確認してください。';
+      } else {
+        errorMessage = 'ダウンロードエラー: ${e.message}';
+      }
+      onError?.call(task.id, errorMessage);
+      rethrow;
+    } catch (e) {
+      onError?.call(task.id, e.toString());
+      rethrow;
+    }
+  }
+
   Future<void> downloadM3U8(DownloadTask task, M3U8Stream stream) async {
     try {
       // セグメントURLがない場合、M3U8を解析

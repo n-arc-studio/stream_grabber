@@ -19,7 +19,7 @@ class M3U8Parser {
     ),
   );
 
-  // WebページからM3U8 URLを検出
+  // WebページからM3U8およびMP4 URLを検出
   Future<List<String>> detectM3U8FromWebsite(String websiteUrl) async {
     try {
       final response = await _dio.get(
@@ -32,19 +32,28 @@ class M3U8Parser {
       );
       final document = html_parser.parse(response.data);
       
-      final List<String> m3u8Urls = [];
+      final List<String> videoUrls = [];
 
-      // scriptタグ内のM3U8 URLを検索
+      // scriptタグ内のM3U8/MP4 URLを検索
       final scripts = document.getElementsByTagName('script');
       for (var script in scripts) {
         final content = script.text;
-        final matches = RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*')
+        // M3U8 URLを検索
+        final m3u8Matches = RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*')
             .allMatches(content);
-        
-        for (var match in matches) {
+        for (var match in m3u8Matches) {
           final url = match.group(0);
-          if (url != null && !m3u8Urls.contains(url)) {
-            m3u8Urls.add(url);
+          if (url != null && !videoUrls.contains(url)) {
+            videoUrls.add(url);
+          }
+        }
+        // MP4 URLを検索
+        final mp4Matches = RegExp(r'https?://[^\s"<>]+\.mp4[^\s"<>]*')
+            .allMatches(content);
+        for (var match in mp4Matches) {
+          final url = match.group(0);
+          if (url != null && !videoUrls.contains(url)) {
+            videoUrls.add(url);
           }
         }
       }
@@ -53,9 +62,9 @@ class M3U8Parser {
       final videos = document.getElementsByTagName('video');
       for (var video in videos) {
         final src = video.attributes['src'];
-        if (src != null && src.contains('.m3u8')) {
-          if (!m3u8Urls.contains(src)) {
-            m3u8Urls.add(src);
+        if (src != null && (src.contains('.m3u8') || src.contains('.mp4'))) {
+          if (!videoUrls.contains(src)) {
+            videoUrls.add(src);
           }
         }
       }
@@ -64,39 +73,48 @@ class M3U8Parser {
       final sources = document.getElementsByTagName('source');
       for (var source in sources) {
         final src = source.attributes['src'];
-        if (src != null && src.contains('.m3u8')) {
-          if (!m3u8Urls.contains(src)) {
-            m3u8Urls.add(src);
+        if (src != null && (src.contains('.m3u8') || src.contains('.mp4'))) {
+          if (!videoUrls.contains(src)) {
+            videoUrls.add(src);
           }
         }
       }
 
-      // ページ全体のテキストからM3U8 URLを検索（fallback）
-      if (m3u8Urls.isEmpty) {
+      // ページ全体のテキストからM3U8/MP4 URLを検索（fallback）
+      if (videoUrls.isEmpty) {
         final bodyText = response.data.toString();
-        final matches = RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*')
+        // M3U8 URLを検索
+        final m3u8Matches = RegExp(r'https?://[^\s"<>]+\.m3u8[^\s"<>]*')
             .allMatches(bodyText);
-        
-        for (var match in matches) {
+        for (var match in m3u8Matches) {
           final url = match.group(0);
-          if (url != null && !m3u8Urls.contains(url)) {
-            m3u8Urls.add(url);
+          if (url != null && !videoUrls.contains(url)) {
+            videoUrls.add(url);
+          }
+        }
+        // MP4 URLを検索
+        final mp4Matches = RegExp(r'https?://[^\s"<>]+\.mp4[^\s"<>]*')
+            .allMatches(bodyText);
+        for (var match in mp4Matches) {
+          final url = match.group(0);
+          if (url != null && !videoUrls.contains(url)) {
+            videoUrls.add(url);
           }
         }
       }
 
-      return m3u8Urls;
+      return videoUrls;
     } on DioException catch (e) {
       if (e.response?.statusCode == 403) {
         print('Error: Access denied (403). The server blocked the request. This website may require authentication or different headers.');
       } else if (e.response?.statusCode == 404) {
         print('Error: Page not found (404). Please check the URL.');
       } else {
-        print('Error detecting M3U8 URLs: ${e.message}');
+        print('Error detecting video URLs: ${e.message}');
       }
       return [];
     } catch (e) {
-      print('Error detecting M3U8 URLs: $e');
+      print('Error detecting video URLs: $e');
       return [];
     }
   }

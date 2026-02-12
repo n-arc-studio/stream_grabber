@@ -54,7 +54,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
       
       if (urls.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('M3U8 URLが検出されませんでした')),
+          const SnackBar(content: Text('動画URLが検出されませんでした')),
         );
       } else if (urls.length == 1) {
         _selectedM3u8Url = urls.first;
@@ -81,7 +81,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
   Future<void> _addToQueue() async {
     if (_selectedM3u8Url == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('M3U8 URLを選択してください')),
+        const SnackBar(content: Text('動画URLを選択してください')),
       );
       return;
     }
@@ -148,7 +148,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
                           : const Icon(Icons.search),
-                      label: Text(_isDetecting ? '検出中...' : 'M3U8を検出'),
+                      label: Text(_isDetecting ? '検出中...' : '動画URLを検出'),
                     ),
                   ],
                 ),
@@ -164,11 +164,11 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'ステップ2: M3U8 URLを選択',
+                        'ステップ2: 動画URLを選択',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
-                      Text('${_detectedUrls.length}個のM3U8 URLが見つかりました'),
+                      Text('${_detectedUrls.length}個の動画URLが見つかりました'),
                       const SizedBox(height: 8),
                       ..._detectedUrls.map((url) => RadioListTile<String>(
                         title: Text(
