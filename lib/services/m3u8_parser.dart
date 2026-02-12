@@ -6,11 +6,20 @@ class M3U8Parser {
   final Dio _dio = Dio(
     BaseOptions(
       headers: {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': '*/*',
-        'Accept-Language': 'ja,en-US;q=0.9,en;q=0.8',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+        'Accept-Language': 'ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7',
         'Accept-Encoding': 'gzip, deflate, br',
+        'Sec-Ch-Ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+        'Sec-Ch-Ua-Mobile': '?0',
+        'Sec-Ch-Ua-Platform': '"Windows"',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'none',
+        'Sec-Fetch-User': '?1',
+        'Upgrade-Insecure-Requests': '1',
         'Connection': 'keep-alive',
+        'DNT': '1',
       },
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 30),
@@ -300,11 +309,19 @@ class M3U8Parser {
       return videoUrls;
     } on DioException catch (e) {
       if (e.response?.statusCode == 403) {
-        print('Error: Access denied (403). The server blocked the request. This website may require authentication or different headers.');
+        print('========================================');
+        print('403 Access Denied: $websiteUrl');
+        print('Website is blocking automated access');
+        print('Possible causes: Cloudflare, geographic restrictions, required authentication');
+        print('Solution: Use browser DevTools (F12 > Network tab) to find actual video URL');
+        print('========================================');
       } else if (e.response?.statusCode == 404) {
         print('Error: Page not found (404). Please check the URL.');
+      } else if (e.response?.statusCode == 429) {
+        print('Error: Too many requests (429). Please wait before retrying.');
       } else {
         print('Error detecting video URLs: ${e.message}');
+        print('Status code: ${e.response?.statusCode}');
       }
       return [];
     } catch (e) {

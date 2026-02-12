@@ -54,7 +54,15 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
       
       if (urls.isEmpty) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('動画URLが検出されませんでした')),
+          const SnackBar(
+            content: Text(
+              '動画URLが検出されませんでした。\n'
+              'サイトがアクセスをブロックしている可能性があります。\n'
+              'ブラウザの開発者ツール(F12)のNetworkタブで\n'
+              '動画URLを直接確認してください。',
+            ),
+            duration: Duration(seconds: 6),
+          ),
         );
       } else if (urls.length == 1) {
         _selectedM3u8Url = urls.first;
