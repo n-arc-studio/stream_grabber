@@ -259,7 +259,7 @@ class DownloaderService {
   Future<void> downloadM3U8Parallel(
     DownloadTask task,
     M3U8Stream stream, {
-    int concurrentDownloads = 5,
+    int concurrentDownloads = 3, // 5から3に削減してUI負荷を軽減
   }) async {
     try {
       List<String> segmentUrls = stream.segmentUrls;

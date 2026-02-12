@@ -16,6 +16,10 @@ class DownloadProvider extends ChangeNotifier {
   List<DownloadTask> _tasks = [];
   bool _isLoading = false;
   String? _error;
+  
+  // 進捗更新のスロットリング用
+  final Map<String, DateTime> _lastNotifyTime = {};
+  static const Duration _notifyThrottle = Duration(milliseconds: 100);
 
   List<DownloadTask> get tasks => _tasks;
   bool get isLoading => _isLoading;
@@ -41,12 +45,21 @@ class DownloadProvider extends ChangeNotifier {
       if (taskIndex != -1) {
         _tasks[taskIndex].progress = progress;
         _tasks[taskIndex].downloadedSegments = downloadedSegments;
-        _dbService.updateTask(_tasks[taskIndex]);
-        notifyListeners();
+        
+        // スロットリング: 最後の通知から一定時間経過した場合のみ通知
+        final now = DateTime.now();
+        final lastNotify = _lastNotifyTime[taskId];
+        
+        if (lastNotify == null || now.difference(lastNotify) >= _notifyThrottle) {
+          _lastNotifyTime[taskId] = now;
+          _dbService.updateTask(_tasks[taskIndex]);
+          notifyListeners();
+        }
       }
     };
 
     _downloaderService.onCompleted = (taskId) {
+      _lastNotifyTime.remove(taskId); // スロットリングマップをクリーンアップ
       final taskIndex = _tasks.indexWhere((t) => t.id == taskId);
       if (taskIndex != -1) {
         final task = _tasks[taskIndex];
@@ -65,6 +78,7 @@ class DownloadProvider extends ChangeNotifier {
     };
 
     _downloaderService.onError = (taskId, error) {
+      _lastNotifyTime.remove(taskId); // スロットリングマップをクリーンアップ
       final taskIndex = _tasks.indexWhere((t) => t.id == taskId);
       if (taskIndex != -1) {
         _tasks[taskIndex].status = DownloadStatus.failed;
@@ -323,6 +337,8 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   Future<void> deleteTask(String taskId) async {
+    _lastNotifyTime.remove(taskId); // スロットリングマップをクリーンアップ
+    
     final taskIndex = _tasks.indexWhere((t) => t.id == taskId);
     if (taskIndex == -1) return;
 
