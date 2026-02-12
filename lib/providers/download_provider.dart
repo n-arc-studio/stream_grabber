@@ -19,7 +19,7 @@ class DownloadProvider extends ChangeNotifier {
   
   // 進捗更新のスロットリング用
   final Map<String, DateTime> _lastNotifyTime = {};
-  static const Duration _notifyThrottle = Duration(milliseconds: 100);
+  static const Duration _notifyThrottle = Duration(milliseconds: 1000);
 
   List<DownloadTask> get tasks => _tasks;
   bool get isLoading => _isLoading;
