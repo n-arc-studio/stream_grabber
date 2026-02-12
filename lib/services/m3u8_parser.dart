@@ -369,21 +369,6 @@ class M3U8Parser {
       return false;
     }
   }
-    
-    return cleaned;
-  }
-
-  // URLが有効かチェック
-  bool _isValidUrl(String url) {
-    if (url.isEmpty) return false;
-    
-    try {
-      final uri = Uri.parse(url);
-      return uri.hasScheme && (uri.scheme == 'http' || uri.scheme == 'https');
-    } catch (e) {
-      return false;
-    }
-  }
 
   // M3U8ファイルを解析
   Future<M3U8Stream> parseM3U8(String m3u8Url) async {
