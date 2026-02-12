@@ -198,8 +198,16 @@ class DownloadProvider extends ChangeNotifier {
         task.completedAt = DateTime.now();
         await _dbService.updateTask(task);
         
+        // FFmpegがファイルを解放するまで少し待機
+        await Future.delayed(const Duration(milliseconds: 500));
+        
         // 一時ファイル削除
-        await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
+        try {
+          await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
+        } catch (e) {
+          print('Warning: Failed to cleanup temp files: $e');
+          // 削除に失敗してもタスクは完了として扱う
+        }
         
         notifyListeners();
       };
@@ -245,14 +253,22 @@ class DownloadProvider extends ChangeNotifier {
 
     final task = _tasks[taskIndex];
     
-    // 一時ファイル削除
-    await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
+    // 一時ファイル削除（エラーが発生しても続行）
+    try {
+      await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
+    } catch (e) {
+      print('Warning: Failed to cleanup temp files during task deletion: $e');
+    }
     
     // 出力ファイル削除（完了済みの場合）
     if (task.status == DownloadStatus.completed) {
-      final outputFile = File('${task.outputPath}/${task.fileName}');
-      if (await outputFile.exists()) {
-        await outputFile.delete();
+      try {
+        final outputFile = File('${task.outputPath}/${task.fileName}');
+        if (await outputFile.exists()) {
+          await outputFile.delete();
+        }
+      } catch (e) {
+        print('Warning: Failed to delete output file: $e');
       }
     }
 

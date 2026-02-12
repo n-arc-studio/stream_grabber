@@ -195,8 +195,48 @@ class DownloaderService {
   Future<void> cleanupTempFiles(String taskId, String outputPath) async {
     final tempDir = Directory('$outputPath/temp_$taskId');
     
-    if (await tempDir.exists()) {
-      await tempDir.delete(recursive: true);
+    if (!await tempDir.exists()) {
+      return;
+    }
+
+    // リトライロジック付きで削除
+    int maxRetries = 3;
+    int retryCount = 0;
+
+    while (retryCount < maxRetries) {
+      try {
+        // まず個別のファイルを削除
+        final files = tempDir.listSync();
+        for (var file in files) {
+          try {
+            if (file is File) {
+              await file.delete();
+            }
+          } catch (e) {
+            print('Warning: Failed to delete file ${file.path}: $e');
+          }
+        }
+
+        // 短い待機時間を入れる（ファイルハンドルが解放されるのを待つ）
+        await Future.delayed(const Duration(milliseconds: 100));
+
+        // ディレクトリを削除
+        await tempDir.delete(recursive: true);
+        print('Successfully cleaned up temp files for task $taskId');
+        return;
+      } catch (e) {
+        retryCount++;
+        print('Warning: Failed to cleanup temp files (attempt $retryCount/$maxRetries): $e');
+        
+        if (retryCount >= maxRetries) {
+          print('Error: Could not delete temp directory after $maxRetries attempts. Path: ${tempDir.path}');
+          // 削除に失敗してもエラーを投げずに続行
+          return;
+        }
+        
+        // リトライ前に待機（指数バックオフ）
+        await Future.delayed(Duration(milliseconds: 500 * retryCount));
+      }
     }
   }
 
