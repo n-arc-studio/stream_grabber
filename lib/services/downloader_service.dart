@@ -15,8 +15,8 @@ class DownloaderService {
         'Accept-Encoding': 'gzip, deflate, br',
         'Connection': 'keep-alive',
       },
-      connectTimeout: const Duration(seconds: 30),
-      receiveTimeout: const Duration(seconds: 60),
+      connectTimeout: const Duration(seconds: 60),
+      receiveTimeout: const Duration(minutes: 3),
       followRedirects: true,
       maxRedirects: 5,
     ),
@@ -146,7 +146,7 @@ class DownloaderService {
   }
 
   Future<void> _downloadSegment(String url, String savePath) async {
-    int maxRetries = 3;
+    int maxRetries = 5;
     int retryCount = 0;
     
     while (retryCount < maxRetries) {
@@ -174,17 +174,25 @@ class DownloaderService {
               'Referer': url,
               'Origin': Uri.parse(url).origin,
             },
-            receiveTimeout: const Duration(seconds: 60),
-            sendTimeout: const Duration(seconds: 30),
+            receiveTimeout: const Duration(minutes: 3),
+            sendTimeout: const Duration(minutes: 1),
+            validateStatus: (status) => status != null && status < 500,
           ),
         );
         return; // 成功したら終了
+      } on DioException catch (e) {
+        retryCount++;
+        if (retryCount >= maxRetries) {
+          rethrow;
+        }
+        // タイムアウトや接続エラーの場合は長めに待機
+        int waitSeconds = 3 * retryCount;
+        await Future.delayed(Duration(seconds: waitSeconds));
       } catch (e) {
         retryCount++;
         if (retryCount >= maxRetries) {
-          rethrow; // 最大リトライ回数を超えたら例外を投げる
+          rethrow;
         }
-        // リトライ前に待機（指数バックオフ）
         await Future.delayed(Duration(seconds: 2 * retryCount));
       }
     }
