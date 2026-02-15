@@ -31,11 +31,12 @@ class M3U8Parser {
 
   // 訪問済みURLを追跡（循環参照を防ぐ）
   final Set<String> _visitedUrls = {};
+  final Set<String> _visitedResourceUrls = {};
 
   // WebページからM3U8およびMP4 URLを検出
   Future<List<String>> detectM3U8FromWebsite(String websiteUrl, {int depth = 0}) async {
     // 深さ制限（無限ループ防止）
-    if (depth > 2) {
+    if (depth > 3) {
       return [];
     }
 
@@ -119,50 +120,16 @@ class M3U8Parser {
       
       for (var script in scripts) {
         final content = script.text;
-        if (content.isEmpty) continue;
-        
-        // エスケープされたURLも検出（\/ を / に置換して検索）
-        final unescapedContent = content.replaceAll(r'\/', '/');
-        
-        // M3U8 URLを検索（より柔軟なパターン）
-        final m3u8Patterns = [
-          RegExp(r'https?://[^\s"<>\\]+\.m3u8[^\s"<>\\]*', caseSensitive: false),
-          RegExp(r'''["']([^"']*\.m3u8[^"']*)["']''', caseSensitive: false),
-          RegExp(r'''file["\s]*:["\s]*["']([^"']*\.m3u8[^"']*)["']''', caseSensitive: false),
-          RegExp(r'''source["\s]*:["\s]*["']([^"']*\.m3u8[^"']*)["']''', caseSensitive: false),
-        ];
-        
-        for (var pattern in m3u8Patterns) {
-          final matches = pattern.allMatches(unescapedContent);
-          for (var match in matches) {
-            final url = match.group(1) ?? match.group(0);
-            if (url != null && url.contains('.m3u8')) {
-              final cleanUrl = _cleanUrl(url);
-              if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-                urlSet.add(cleanUrl);
-              }
-            }
-          }
+        if (content.isNotEmpty) {
+          urlSet.addAll(_extractMediaUrlsFromText(content, websiteUrl));
+          urlSet.addAll(await _fetchApiCandidatesFromText(content, websiteUrl));
         }
-        
-        // MP4 URLを検索
-        final mp4Patterns = [
-          RegExp(r'https?://[^\s"<>\\]+\.mp4[^\s"<>\\]*', caseSensitive: false),
-          RegExp(r'''["']([^"']*\.mp4[^"']*)["']''', caseSensitive: false),
-          RegExp(r'''file["\s]*:["\s]*["']([^"']*\.mp4[^"']*)["']''', caseSensitive: false),
-          RegExp(r'''source["\s]*:["\s]*["']([^"']*\.mp4[^"']*)["']''', caseSensitive: false),
-        ];
-        
-        for (var pattern in mp4Patterns) {
-          final matches = pattern.allMatches(unescapedContent);
-          for (var match in matches) {
-            final url = match.group(1) ?? match.group(0);
-            if (url != null && url.contains('.mp4')) {
-              final cleanUrl = _cleanUrl(url);
-              if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-                urlSet.add(cleanUrl);
-              }
-            }
+
+        final scriptSrc = script.attributes['src'];
+        if (scriptSrc != null && scriptSrc.isNotEmpty) {
+          final resolvedScriptUrl = _resolvePossibleUrl(websiteUrl, scriptSrc);
+          if (_isValidUrl(resolvedScriptUrl) && !_isAdDomain(resolvedScriptUrl)) {
+            urlSet.addAll(await _fetchAndScanText(resolvedScriptUrl, referer: websiteUrl));
           }
         }
       }
@@ -172,9 +139,9 @@ class M3U8Parser {
       for (var video in videos) {
         final src = video.attributes['src'] ?? video.attributes['data-src'];
         if (src != null && (src.contains('.m3u8') || src.contains('.mp4'))) {
-          final cleanUrl = _cleanUrl(src);
-          if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-            urlSet.add(cleanUrl);
+          final resolvedUrl = _resolvePossibleUrl(websiteUrl, _cleanUrl(src));
+          if (_isValidUrl(resolvedUrl)) {
+            urlSet.add(resolvedUrl);
           }
         }
       }
@@ -184,73 +151,40 @@ class M3U8Parser {
       for (var source in sources) {
         final src = source.attributes['src'] ?? source.attributes['data-src'];
         if (src != null && (src.contains('.m3u8') || src.contains('.mp4'))) {
-          final cleanUrl = _cleanUrl(src);
-          if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-            urlSet.add(cleanUrl);
+          final resolvedUrl = _resolvePossibleUrl(websiteUrl, _cleanUrl(src));
+          if (_isValidUrl(resolvedUrl)) {
+            urlSet.add(resolvedUrl);
           }
         }
       }
 
       // 5. data-*属性からURLを検索
-      final allElements = document.querySelectorAll('[data-video], [data-src], [data-source], [data-url]');
+      final allElements = document.querySelectorAll(
+        '[data-video], [data-src], [data-source], [data-url], [data-setup], [data-hls], [data-options], [data-config], [data-player], [data-api]'
+      );
       for (var element in allElements) {
         final dataVideo = element.attributes['data-video'];
         final dataSrc = element.attributes['data-src'];
         final dataSource = element.attributes['data-source'];
         final dataUrl = element.attributes['data-url'];
+        final dataSetup = element.attributes['data-setup'];
+        final dataHls = element.attributes['data-hls'];
+        final dataOptions = element.attributes['data-options'];
+        final dataConfig = element.attributes['data-config'];
+        final dataPlayer = element.attributes['data-player'];
+        final dataApi = element.attributes['data-api'];
         
-        for (var attr in [dataVideo, dataSrc, dataSource, dataUrl]) {
-          if (attr != null && (attr.contains('.m3u8') || attr.contains('.mp4'))) {
-            final cleanUrl = _cleanUrl(attr);
-            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-              urlSet.add(cleanUrl);
-            }
-          }
+        for (var attr in [dataVideo, dataSrc, dataSource, dataUrl, dataSetup, dataHls, dataOptions, dataConfig, dataPlayer, dataApi]) {
+          if (attr == null || attr.isEmpty) continue;
+          urlSet.addAll(_extractMediaUrlsFromText(attr, websiteUrl));
+          urlSet.addAll(await _fetchApiCandidatesFromText(attr, websiteUrl));
         }
       }
 
       // 6. ページ全体のテキストから検索（fallback）
       if (urlSet.isEmpty) {
-        final unescapedBody = bodyText.replaceAll(r'\/', '/');
-        
-        // M3U8検索
-        final allM3u8 = RegExp(r'https?://[^\s"<>\\]+\.m3u8[^\s"<>\\]*', caseSensitive: false)
-            .allMatches(unescapedBody);
-        for (var match in allM3u8) {
-          final url = match.group(0);
-          if (url != null) {
-            final cleanUrl = _cleanUrl(url);
-            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-              urlSet.add(cleanUrl);
-            }
-          }
-        }
-        
-        // MP4検索
-        final allMp4 = RegExp(r'https?://[^\s"<>\\]+\.mp4[^\s"<>\\]*', caseSensitive: false)
-            .allMatches(unescapedBody);
-        for (var match in allMp4) {
-          final url = match.group(0);
-          if (url != null) {
-            final cleanUrl = _cleanUrl(url);
-            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-              urlSet.add(cleanUrl);
-            }
-          }
-        }
-        
-        // MPD検索 (MPEG-DASH)
-        final allMpd = RegExp(r'https?://[^\s"<>\\]+\.mpd[^\s"<>\\]*', caseSensitive: false)
-            .allMatches(unescapedBody);
-        for (var match in allMpd) {
-          final url = match.group(0);
-          if (url != null) {
-            final cleanUrl = _cleanUrl(url);
-            if (cleanUrl.isNotEmpty && _isValidUrl(cleanUrl)) {
-              urlSet.add(cleanUrl);
-            }
-          }
-        }
+        urlSet.addAll(_extractMediaUrlsFromText(bodyText, websiteUrl));
+        urlSet.addAll(await _fetchApiCandidatesFromText(bodyText, websiteUrl));
       }
 
       // 7. embedドメインや動画ホスティングサービスのURLを検出
@@ -265,7 +199,7 @@ class M3U8Parser {
           final url = match.group(0);
           if (url != null && _isValidUrl(url)) {
             // embedページを再帰的に検索
-            if (depth < 2) {
+            if (depth < 3) {
               try {
                 final embedUrls = await detectM3U8FromWebsite(url, depth: depth + 1);
                 urlSet.addAll(embedUrls);
@@ -300,6 +234,123 @@ class M3U8Parser {
     } catch (e) {
       print('Error detecting video URLs: $e');
       return [];
+    }
+  }
+
+  Set<String> _extractMediaUrlsFromText(String text, String baseUrl) {
+    final results = <String>{};
+    final unescaped = text.replaceAll(r'\/', '/');
+
+    final patterns = [
+      RegExp(r'https?://[^\s"<>\\]+\.(?:m3u8|mp4)[^\s"<>\\]*', caseSensitive: false),
+      RegExp(r'''["']([^"']+\.(?:m3u8|mp4)[^"']*)['"']''', caseSensitive: false),
+      RegExp(r'''(?:file|source|src|hls|playlist|manifest|m3u8)["\s]*[:=]["']([^"']+)["']''', caseSensitive: false),
+    ];
+
+    for (var pattern in patterns) {
+      final matches = pattern.allMatches(unescaped);
+      for (var match in matches) {
+        final url = match.group(1) ?? match.group(0);
+        if (url == null) continue;
+        if (!url.contains('.m3u8') && !url.contains('.mp4')) {
+          continue;
+        }
+        final cleaned = _cleanUrl(url);
+        if (cleaned.isEmpty) continue;
+        final resolved = _resolvePossibleUrl(baseUrl, cleaned);
+        if (_isValidUrl(resolved)) {
+          results.add(resolved);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  Future<Set<String>> _fetchAndScanText(String url, {String? referer}) async {
+    if (_visitedResourceUrls.contains(url)) {
+      return {};
+    }
+    _visitedResourceUrls.add(url);
+
+    try {
+      final response = await _dio.get(
+        url,
+        options: Options(
+          headers: {
+            if (referer != null) 'Referer': referer,
+            'Accept': '*/*',
+          },
+          responseType: ResponseType.plain,
+        ),
+      );
+      final content = response.data.toString();
+      return _extractMediaUrlsFromText(content, url);
+    } catch (e) {
+      return {};
+    }
+  }
+
+  Future<Set<String>> _fetchApiCandidatesFromText(String text, String baseUrl) async {
+    final candidates = _extractApiCandidatesFromText(text, baseUrl);
+    if (candidates.isEmpty) return {};
+
+    final results = <String>{};
+    int fetched = 0;
+
+    for (final candidate in candidates) {
+      if (fetched >= 5) break;
+      results.addAll(await _fetchAndScanText(candidate, referer: baseUrl));
+      fetched++;
+    }
+
+    return results;
+  }
+
+  Set<String> _extractApiCandidatesFromText(String text, String baseUrl) {
+    final results = <String>{};
+    final unescaped = text.replaceAll(r'\/', '/');
+    final patterns = [
+      RegExp(r'https?://[^\s"<>\\]+(?:/api/|\.json)[^\s"<>\\]*', caseSensitive: false),
+      RegExp(r'''["']([^"']+(?:/api/|\.json)[^"']*)["']''', caseSensitive: false),
+    ];
+
+    for (var pattern in patterns) {
+      final matches = pattern.allMatches(unescaped);
+      for (var match in matches) {
+        final url = match.group(1) ?? match.group(0);
+        if (url == null) continue;
+        final cleaned = _cleanUrl(url);
+        if (cleaned.isEmpty) continue;
+        final resolved = _resolvePossibleUrl(baseUrl, cleaned);
+        if (_isValidUrl(resolved)) {
+          results.add(resolved);
+        }
+      }
+    }
+
+    return results;
+  }
+
+  String _resolvePossibleUrl(String baseUrl, String url) {
+    final trimmed = url.trim();
+    if (trimmed.isEmpty) return trimmed;
+    if (trimmed.startsWith('http://') || trimmed.startsWith('https://')) {
+      return trimmed;
+    }
+    if (trimmed.startsWith('//')) {
+      try {
+        final baseUri = Uri.parse(baseUrl);
+        return '${baseUri.scheme}:$trimmed';
+      } catch (e) {
+        return trimmed;
+      }
+    }
+    try {
+      final baseUri = Uri.parse(baseUrl);
+      return baseUri.resolve(trimmed).toString();
+    } catch (e) {
+      return trimmed;
     }
   }
 
@@ -361,8 +412,22 @@ class M3U8Parser {
   }
 
   // M3U8ファイルを解析
-  Future<M3U8Stream> parseM3U8(String m3u8Url) async {
+  Future<M3U8Stream> parseM3U8(
+    String m3u8Url, {
+    int depth = 0,
+    Set<String>? visited,
+  }) async {
     try {
+      if (depth > 3) {
+        throw Exception('M3U8解析の再帰深度が上限に達しました。');
+      }
+
+      final visitedUrls = visited ?? <String>{};
+      if (visitedUrls.contains(m3u8Url)) {
+        throw Exception('M3U8解析中に循環参照が検出されました。');
+      }
+      visitedUrls.add(m3u8Url);
+
       final response = await _dio.get(
         m3u8Url,
         options: Options(
@@ -379,11 +444,32 @@ class M3U8Parser {
 
       if (isMasterPlaylist) {
         // マスタープレイリストの場合、最高品質のストリームを選択
-        return _parseMasterPlaylist(m3u8Url, lines);
-      } else {
-        // メディアプレイリストの場合、セグメントURLを抽出
-        return _parseMediaPlaylist(m3u8Url, lines);
+        final masterStream = _parseMasterPlaylist(m3u8Url, lines);
+        if (masterStream.url == m3u8Url) {
+          return masterStream;
+        }
+        return await parseM3U8(
+          masterStream.url,
+          depth: depth + 1,
+          visited: visitedUrls,
+        );
       }
+
+      // メディアプレイリストの場合、セグメントURLを抽出
+      final mediaStream = await _parseMediaPlaylist(m3u8Url, lines);
+      if (mediaStream.segmentUrls.isNotEmpty) {
+        final allAreM3u8 = mediaStream.segmentUrls
+            .every((url) => url.toLowerCase().contains('.m3u8'));
+        if (allAreM3u8) {
+          return await parseM3U8(
+            mediaStream.segmentUrls.first,
+            depth: depth + 1,
+            visited: visitedUrls,
+          );
+        }
+      }
+
+      return mediaStream;
     } catch (e) {
       rethrow;
     }
@@ -427,6 +513,7 @@ class M3U8Parser {
     final List<String> segmentUrls = [];
     bool isEncrypted = false;
     String? keyUri;
+    String? initSegmentUrl;
 
     for (int i = 0; i < lines.length; i++) {
       final line = lines[i];
@@ -436,6 +523,13 @@ class M3U8Parser {
         final uriMatch = RegExp(r'URI="([^"]+)"').firstMatch(line);
         if (uriMatch != null) {
           keyUri = _resolveUrl(baseUrl, uriMatch.group(1)!);
+        }
+      }
+
+      if (line.startsWith('#EXT-X-MAP')) {
+        final uriMatch = RegExp(r'URI="([^"]+)"').firstMatch(line);
+        if (uriMatch != null) {
+          initSegmentUrl = _resolveUrl(baseUrl, uriMatch.group(1)!);
         }
       }
 
@@ -449,6 +543,7 @@ class M3U8Parser {
       url: baseUrl,
       quality: 'Standard',
       segmentUrls: segmentUrls,
+      initSegmentUrl: initSegmentUrl,
       isEncrypted: isEncrypted,
       keyUri: keyUri,
     );
@@ -608,6 +703,7 @@ class M3U8Parser {
       final List<String> segmentUrls = [];
       bool isEncrypted = false;
       String? keyUri;
+      String? initSegmentUrl;
 
       for (int i = 0; i < lines.length; i++) {
         final line = lines[i];
@@ -617,6 +713,13 @@ class M3U8Parser {
           final uriMatch = RegExp(r'URI="([^"]+)"').firstMatch(line);
           if (uriMatch != null) {
             keyUri = _resolveLocalUrl(baseFilePath, uriMatch.group(1)!);
+          }
+        }
+
+        if (line.startsWith('#EXT-X-MAP')) {
+          final uriMatch = RegExp(r'URI="([^"]+)"').firstMatch(line);
+          if (uriMatch != null) {
+            initSegmentUrl = _resolveLocalUrl(baseFilePath, uriMatch.group(1)!);
           }
         }
 
@@ -634,6 +737,7 @@ class M3U8Parser {
         url: baseFilePath,
         quality: 'Standard',
         segmentUrls: segmentUrls,
+        initSegmentUrl: initSegmentUrl,
         isEncrypted: isEncrypted,
         keyUri: keyUri,
       );

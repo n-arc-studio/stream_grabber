@@ -294,9 +294,9 @@ class DownloadItem extends StatelessWidget {
   String _getStatusText() {
     switch (task.status) {
       case DownloadStatus.pending:
-        return 'ダウンロード待機中...';
+        return '処理待機中...';
       case DownloadStatus.downloading:
-        return 'ダウンロード中...';
+        return 'アーカイブ中...';
       case DownloadStatus.merging:
         return 'ビデオ結合中...';
       case DownloadStatus.completed:

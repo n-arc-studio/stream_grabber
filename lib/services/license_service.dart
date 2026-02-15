@@ -7,7 +7,7 @@ class LicenseService {
   static const String _activationDate = 'activation_date';
 
   // ライセンス検証用のシークレットキー（本番環境では安全に管理すること）
-  static const String _secretKey = 'StreamGrabber2026SecretKey';
+  static const String _secretKey = 'HLSBackupManager2026SecretKey';
 
   Future<bool> isLicenseValid() async {
     final prefs = await SharedPreferences.getInstance();
@@ -52,7 +52,7 @@ class LicenseService {
 
   bool _validateLicenseKey(String licenseKey) {
     // 簡易的なライセンスキー検証
-    // フォーマット: SGXX-XXXX-XXXX-XXXX (SG = StreamGrabber)
+    // フォーマット: SGXX-XXXX-XXXX-XXXX (SG = HLS Backup Manager)
     final regex = RegExp(r'^SG[A-Z0-9]{2}-[A-Z0-9]{4}-[A-Z0-9]{4}-[A-Z0-9]{4}$');
     
     if (!regex.hasMatch(licenseKey)) {

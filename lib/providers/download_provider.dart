@@ -5,6 +5,7 @@ import '../services/database_service.dart';
 import '../services/downloader_service.dart';
 import '../services/ffmpeg_service.dart';
 import '../services/m3u8_parser.dart';
+import '../services/audit_log_service.dart';
 import 'dart:io';
 
 class DownloadProvider extends ChangeNotifier {
@@ -12,6 +13,7 @@ class DownloadProvider extends ChangeNotifier {
   final DownloaderService _downloaderService = DownloaderService();
   final FFmpegService _ffmpegService = FFmpegService();
   final M3U8Parser _m3u8Parser = M3U8Parser();
+  final AuditLogService _auditLog = AuditLogService();
 
   List<DownloadTask> _tasks = [];
   bool _isLoading = false;
@@ -64,11 +66,12 @@ class DownloadProvider extends ChangeNotifier {
       if (taskIndex != -1) {
         final task = _tasks[taskIndex];
         // MP4の場合はマージ不要
-        if (task.url.toLowerCase().contains('.mp4')) {
+        if (_isMp4Url(task.url)) {
           task.status = DownloadStatus.completed;
           task.progress = 1.0;
           task.completedAt = DateTime.now();
           _dbService.updateTask(task);
+          _auditLog.logArchiveComplete(taskId: task.id, url: task.url);
           notifyListeners();
         } else {
           // M3U8の場合はマージ処理へ
@@ -101,18 +104,6 @@ class DownloadProvider extends ChangeNotifier {
     } finally {
       _isLoading = false;
       notifyListeners();
-    }
-  }
-
-  Future<List<String>> detectM3U8FromWebsite(String websiteUrl) async {
-    try {
-      // 訪問済みURLをクリア（新しい検索を開始）
-      _m3u8Parser.clearVisitedUrls();
-      return await _m3u8Parser.detectM3U8FromWebsite(websiteUrl);
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      return [];
     }
   }
 
@@ -159,6 +150,13 @@ class DownloadProvider extends ChangeNotifier {
       await _dbService.insertTask(task);
       _tasks.insert(0, task);
       notifyListeners();
+
+      // 監査ログ記録
+      await _auditLog.logArchiveStart(
+        taskId: task.id,
+        url: m3u8FilePath,
+        fileName: fileName,
+      );
 
       // 自動ダウンロード開始
       await startLocalDownload(task.id, selectedStream: selectedStream);
@@ -215,6 +213,13 @@ class DownloadProvider extends ChangeNotifier {
       _tasks.insert(0, task);
       notifyListeners();
 
+      // 監査ログ記録
+      await _auditLog.logArchiveStart(
+        taskId: task.id,
+        url: m3u8Url,
+        fileName: name,
+      );
+
       // 自動ダウンロード開始
       await startDownload(task.id, selectedStream: selectedStream);
     } catch (e) {
@@ -234,14 +239,18 @@ class DownloadProvider extends ChangeNotifier {
 
     try {
       // URLがMP4かM3U8かを判別
-      if (task.url.toLowerCase().contains('.mp4')) {
-        // MP4の直接ダウンロード
-        await _downloaderService.downloadMP4(task, task.url);
-      } else {
-        // M3U8のダウンロード
+      if (_isM3u8Url(task.url)) {
+        // M3U8の処理
         M3U8Stream stream = selectedStream ?? await _m3u8Parser.parseM3U8(task.url);
         
         // 並列ダウンロードを使用
+        await _downloaderService.downloadM3U8Parallel(task, stream);
+      } else if (_isMp4Url(task.url)) {
+        // MP4の直接ダウンロード
+        await _downloaderService.downloadMP4(task, task.url);
+      } else {
+        // 拡張子が曖昧な場合はM3U8として扱う
+        M3U8Stream stream = selectedStream ?? await _m3u8Parser.parseM3U8(task.url);
         await _downloaderService.downloadM3U8Parallel(task, stream);
       }
     } catch (e) {
@@ -249,6 +258,29 @@ class DownloadProvider extends ChangeNotifier {
       task.errorMessage = e.toString();
       await _dbService.updateTask(task);
       notifyListeners();
+    }
+  }
+
+  bool _isM3u8Url(String url) {
+    final normalized = url.trim().toLowerCase();
+    try {
+      final uri = Uri.parse(normalized);
+      return uri.path.endsWith('.m3u8');
+    } catch (e) {
+      return normalized.contains('.m3u8');
+    }
+  }
+
+  bool _isMp4Url(String url) {
+    final normalized = url.trim().toLowerCase();
+    if (_isM3u8Url(normalized)) {
+      return false;
+    }
+    try {
+      final uri = Uri.parse(normalized);
+      return uri.path.endsWith('.mp4');
+    } catch (e) {
+      return normalized.contains('.mp4');
     }
   }
 
@@ -275,21 +307,30 @@ class DownloadProvider extends ChangeNotifier {
       final outputFile = '${task.outputPath}/${task.fileName}';
       
       _ffmpegService.onCompleted = () async {
+        final output = File(outputFile);
+        if (!await output.exists() || await output.length() == 0) {
+          task.status = DownloadStatus.failed;
+          task.errorMessage = 'Merge failed: output file is empty';
+          await _dbService.updateTask(task);
+          notifyListeners();
+          return;
+        }
+
         task.status = DownloadStatus.completed;
         task.progress = 1.0;
         task.completedAt = DateTime.now();
         await _dbService.updateTask(task);
-        
+
         // FFmpegがファイルを解放するまで少し待機
         await Future.delayed(const Duration(milliseconds: 500));
-        
+
         // 一時ファイル削除
         try {
           await _downloaderService.cleanupTempFiles(task.id, task.outputPath);
         } catch (e) {
           // Ignore cleanup errors
         }
-        
+
         notifyListeners();
       };
 

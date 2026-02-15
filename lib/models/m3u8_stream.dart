@@ -4,6 +4,7 @@ class M3U8Stream {
   final int? bandwidth;
   final String? resolution;
   final List<String> segmentUrls;
+  final String? initSegmentUrl;
   final bool isEncrypted;
   final String? keyUri;
 
@@ -13,6 +14,7 @@ class M3U8Stream {
     this.bandwidth,
     this.resolution,
     this.segmentUrls = const [],
+    this.initSegmentUrl,
     this.isEncrypted = false,
     this.keyUri,
   });
@@ -35,6 +37,7 @@ class M3U8Stream {
       'bandwidth': bandwidth,
       'resolution': resolution,
       'segmentUrls': segmentUrls,
+      'initSegmentUrl': initSegmentUrl,
       'isEncrypted': isEncrypted,
       'keyUri': keyUri,
     };
@@ -50,6 +53,7 @@ class M3U8Stream {
               ?.map((e) => e as String)
               .toList() ??
           [],
+      initSegmentUrl: map['initSegmentUrl'] as String?,
       isEncrypted: map['isEncrypted'] as bool? ?? false,
       keyUri: map['keyUri'] as String?,
     );

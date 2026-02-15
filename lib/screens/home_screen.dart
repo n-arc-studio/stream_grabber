@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('StreamGrabber'),
+        title: const Text('HLS Backup Manager'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),
@@ -48,7 +48,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           controller: _tabController,
           tabs: const [
             Tab(text: 'すべて', icon: Icon(Icons.list)),
-            Tab(text: '進行中', icon: Icon(Icons.downloading)),
+            Tab(text: '進行中', icon: Icon(Icons.sync)),
             Tab(text: '完了', icon: Icon(Icons.check_circle)),
           ],
         ),
@@ -80,7 +80,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           return TabBarView(
             controller: _tabController,
             children: [
-              _buildTaskList(provider.tasks, provider, '未ダウンロード'),
+              _buildTaskList(provider.tasks, provider, 'タスクなし'),
               _buildTaskList(provider.activeTasks, provider, '進行中のタスクがありません'),
               _buildTaskList(provider.completedTasks, provider, '完了したタスクがありません'),
             ],

@@ -376,7 +376,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ],
                           ),
                           const Divider(height: 24),
-                          _buildInfoRow('アプリ名', 'StreamGrabber'),
+                          _buildInfoRow('アプリ名', 'HLS Backup Manager'),
                           const SizedBox(height: 8),
                           _buildInfoRow('バージョン', '1.0.0'),
                           const SizedBox(height: 8),

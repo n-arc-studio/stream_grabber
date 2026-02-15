@@ -61,6 +61,10 @@ dependencies:
   
   # HTTP for web scraping
   http: ^1.1.2
+
+  # WebView for playback-based detection
+  webview_flutter: ^4.7.0
+  webview_windows: ^0.4.0
   
   # Crypto for license validation
   crypto: ^3.0.3

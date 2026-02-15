@@ -5,6 +5,33 @@ class FFmpegService {
   Function(String error)? onError;
   Function()? onCompleted;
 
+  bool _hasNonAscii(String value) {
+    return value.codeUnits.any((unit) => unit > 127);
+  }
+
+  String _buildTempListFilePath() {
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    return '${Directory.systemTemp.path}/HLSBackup_segments_$stamp.txt';
+  }
+
+  String _buildSafeOutputPath(String outputPath) {
+    final stamp = DateTime.now().millisecondsSinceEpoch;
+    final extension = outputPath.contains('.')
+        ? outputPath.split('.').last
+        : 'mp4';
+    return '${Directory.systemTemp.path}/HLSBackup_output_$stamp.$extension';
+  }
+
+  Future<void> _moveOutputFile(String fromPath, String toPath) async {
+    if (fromPath == toPath) return;
+    final source = File(fromPath);
+    if (!await source.exists()) return;
+    final target = File(toPath);
+    await target.parent.create(recursive: true);
+    await source.copy(toPath);
+    await source.delete();
+  }
+
   // FFmpegコマンドを実行
   Future<bool> _executeFFmpeg(List<String> arguments) async {
     try {
@@ -22,11 +49,20 @@ class FFmpegService {
         runInShell: true,
       );
 
+      final stdoutText = result.stdout.toString();
+      final stderrText = result.stderr.toString();
+      if (stdoutText.isNotEmpty) {
+        print('FFmpeg stdout:\n$stdoutText');
+      }
+      if (stderrText.isNotEmpty) {
+        print('FFmpeg stderr:\n$stderrText');
+      }
+
       if (result.exitCode == 0) {
         onCompleted?.call();
         return true;
       } else {
-        final error = result.stderr.toString();
+        final error = stderrText;
         onError?.call(error.isNotEmpty ? error : 'FFmpeg execution failed');
         return false;
       }
@@ -43,12 +79,16 @@ class FFmpegService {
   ) async {
     try {
       // セグメントリストファイル作成
-      final listFile = File('${outputPath}_segments.txt');
+      final listFile = File(_buildTempListFilePath());
       final listContent = segmentPaths
           .map((path) => "file '${path.replaceAll('\\', '/')}'")
           .join('\n');
       
       await listFile.writeAsString(listContent);
+
+      final useSafeOutput = _hasNonAscii(outputPath);
+      final actualOutputPath =
+          useSafeOutput ? _buildSafeOutputPath(outputPath) : outputPath;
 
       // FFmpegコマンド実行
       final arguments = [
@@ -57,15 +97,28 @@ class FFmpegService {
         '-i', listFile.path,
         '-c', 'copy',
         '-bsf:a', 'aac_adtstoasc',
-        outputPath,
+        actualOutputPath,
         '-y', // 上書き許可
       ];
       
       final success = await _executeFFmpeg(arguments);
 
-      // リストファイル削除
-      if (await listFile.exists()) {
-        await listFile.delete();
+      if (success && useSafeOutput) {
+        await _moveOutputFile(actualOutputPath, outputPath);
+      } else if (!success && useSafeOutput) {
+        final tempFile = File(actualOutputPath);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
+
+      // 失敗時は原因調査のためリストを残す
+      if (success) {
+        if (await listFile.exists()) {
+          await listFile.delete();
+        }
+      } else {
+        onError?.call('Concat list retained for debugging: ${listFile.path}');
       }
 
       return success;
@@ -81,26 +134,43 @@ class FFmpegService {
     String outputPath,
   ) async {
     try {
-      final listFile = File('${outputPath}_segments.txt');
+      final listFile = File(_buildTempListFilePath());
       final listContent = segmentPaths
           .map((path) => "file '${path.replaceAll('\\', '/')}'")
           .join('\n');
       
       await listFile.writeAsString(listContent);
 
+      final useSafeOutput = _hasNonAscii(outputPath);
+      final actualOutputPath =
+          useSafeOutput ? _buildSafeOutputPath(outputPath) : outputPath;
+
       final arguments = [
         '-f', 'concat',
         '-safe', '0',
         '-i', listFile.path,
         '-c', 'copy',
-        outputPath,
+        actualOutputPath,
         '-y',
       ];
       
       final success = await _executeFFmpeg(arguments);
 
-      if (await listFile.exists()) {
-        await listFile.delete();
+      if (success && useSafeOutput) {
+        await _moveOutputFile(actualOutputPath, outputPath);
+      } else if (!success && useSafeOutput) {
+        final tempFile = File(actualOutputPath);
+        if (await tempFile.exists()) {
+          await tempFile.delete();
+        }
+      }
+
+      if (success) {
+        if (await listFile.exists()) {
+          await listFile.delete();
+        }
+      } else {
+        onError?.call('Concat list retained for debugging: ${listFile.path}');
       }
 
       return success;

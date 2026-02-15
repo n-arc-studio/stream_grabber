@@ -1,10 +1,12 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'providers/download_provider.dart';
 import 'screens/home_screen.dart';
 import 'services/license_service.dart';
+import 'services/audit_log_service.dart';
 
 void main() {
   // Initialize FFI for desktop platforms
@@ -24,7 +26,7 @@ class MyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => DownloadProvider(),
       child: MaterialApp(
-        title: 'StreamGrabber',
+        title: 'HLS Backup Manager',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
@@ -41,7 +43,127 @@ class MyApp extends StatelessWidget {
           useMaterial3: true,
         ),
         themeMode: ThemeMode.system,
-        home: const LicenseCheckScreen(),
+        home: const DisclaimerGate(),
+      ),
+    );
+  }
+}
+
+/// 起動時に免責事項同意を要求するゲート画面
+class DisclaimerGate extends StatefulWidget {
+  const DisclaimerGate({super.key});
+
+  @override
+  State<DisclaimerGate> createState() => _DisclaimerGateState();
+}
+
+class _DisclaimerGateState extends State<DisclaimerGate> {
+  bool _loading = true;
+  bool _accepted = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _checkDisclaimer();
+  }
+
+  Future<void> _checkDisclaimer() async {
+    final prefs = await SharedPreferences.getInstance();
+    final accepted = prefs.getBool('disclaimer_accepted') ?? false;
+    setState(() {
+      _accepted = accepted;
+      _loading = false;
+    });
+  }
+
+  Future<void> _acceptDisclaimer() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('disclaimer_accepted', true);
+
+    // 同意ログを記録
+    await AuditLogService().log(
+      action: 'disclaimer_accepted',
+      detail: '利用規約に同意しました',
+    );
+
+    setState(() => _accepted = true);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    }
+
+    if (_accepted) {
+      return const LicenseCheckScreen();
+    }
+
+    return Scaffold(
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(32),
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              const Icon(Icons.security, size: 64, color: Colors.deepPurple),
+              const SizedBox(height: 24),
+              const Text(
+                'HLS Backup Manager',
+                style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'HLSストリーミング配信管理ツール',
+                style: TextStyle(fontSize: 16, color: Colors.grey),
+              ),
+              const SizedBox(height: 32),
+              Container(
+                padding: const EdgeInsets.all(20),
+                decoration: BoxDecoration(
+                  border: Border.all(color: Colors.grey[400]!),
+                  borderRadius: BorderRadius.circular(12),
+                  color: Colors.grey[50],
+                ),
+                constraints: const BoxConstraints(maxWidth: 600),
+                child: const Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      '利用規約',
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    SizedBox(height: 16),
+                    Text(
+                      '本ソフトウェアは、著作権者自身が権利を持つ'
+                      'HLSストリーミング配信のアーカイブ・品質検査・'
+                      'バックアップ用途に限定して提供されます。\n\n'
+                      '以下の行為は禁止されています：\n'
+                      '・第三者が権利を持つコンテンツの保存\n'
+                      '・動画配信サービスの利用規約に違反する使用\n'
+                      '・DRM保護されたコンテンツの処理\n'
+                      '・不正アクセスまたはアクセス制御の回避\n\n'
+                      '本ソフトウェアはDRM保護されたストリームに'
+                      '対応していません（暗号鍵の取得・復号処理は'
+                      '一切実装されていません）。\n\n'
+                      'すべての操作は監査ログとして記録されます。',
+                      style: TextStyle(fontSize: 14, height: 1.6),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 24),
+              ElevatedButton.icon(
+                onPressed: _acceptDisclaimer,
+                icon: const Icon(Icons.check_circle),
+                label: const Text('上記に同意して利用を開始'),
+                style: ElevatedButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                ),
+              ),
+            ],
+          ),
+        ),
       ),
     );
   }
@@ -87,7 +209,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('StreamGrabberのライセンスキーを入力してください。'),
+            const Text('HLS Backup Managerのライセンスキーを入力してください。'),
             const SizedBox(height: 16),
             TextField(
               controller: controller,
@@ -146,7 +268,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('StreamGrabber'),
+        title: const Text('HLS Backup Manager'),
       ),
       body: Center(
         child: Padding(
@@ -155,13 +277,13 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
             mainAxisAlignment: MainAxisAlignment.center,
             children: [
               const Icon(
-                Icons.download,
+                Icons.cloud_download_outlined,
                 size: 80,
                 color: Colors.deepPurple,
               ),
               const SizedBox(height: 24),
               const Text(
-                'StreamGrabber',
+                'HLS Backup Manager',
                 style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
@@ -169,7 +291,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'M3U8ストリーミングビデオダウンローダー',
+                'HLSストリーミング配信管理ツール',
                 style: TextStyle(fontSize: 16),
                 textAlign: TextAlign.center,
               ),

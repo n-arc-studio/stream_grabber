@@ -12,11 +12,9 @@ class UrlInputScreen extends StatefulWidget {
 }
 
 class _UrlInputScreenState extends State<UrlInputScreen> {
-  final _websiteController = TextEditingController();
+  final _m3u8UrlController = TextEditingController();
   final _fileNameController = TextEditingController();
   
-  bool _isDetecting = false;
-  List<String> _detectedUrls = [];
   String? _selectedM3u8Url;
   String? _selectedLocalFilePath;
   List<M3U8Stream>? _availableStreams;
@@ -27,51 +25,39 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
 
   @override
   void dispose() {
-    _websiteController.dispose();
+    _m3u8UrlController.dispose();
     _fileNameController.dispose();
     super.dispose();
   }
 
-  Future<void> _detectM3U8() async {
-    if (_websiteController.text.isEmpty) {
+  Future<void> _setM3u8Url() async {
+    final url = _m3u8UrlController.text.trim();
+    if (url.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('WebサイトのURLを入力してください')),
+        const SnackBar(content: Text('M3U8のURLを入力してください')),
+      );
+      return;
+    }
+
+    if (!url.toLowerCase().contains('.m3u8')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('M3U8形式のURLを入力してください（.m3u8を含むURL）'),
+          duration: Duration(seconds: 3),
+        ),
       );
       return;
     }
 
     setState(() {
-      _isDetecting = true;
-      _detectedUrls = [];
-      _selectedM3u8Url = null;
+      _selectedM3u8Url = url;
+      _isLocalFile = false;
+      _selectedLocalFilePath = null;
       _availableStreams = null;
       _selectedStream = null;
     });
 
-    final provider = context.read<DownloadProvider>();
-    final urls = await provider.detectM3U8FromWebsite(_websiteController.text);
-
-    setState(() {
-      _detectedUrls = urls;
-      _isDetecting = false;
-      
-      if (urls.isEmpty) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              '動画URLが検出されませんでした。\n'
-              'サイトがアクセスをブロックしている可能性があります。\n'
-              'ブラウザの開発者ツール(F12)のNetworkタブで\n'
-              '動画URLを直接確認してください。',
-            ),
-            duration: Duration(seconds: 6),
-          ),
-        );
-      } else if (urls.length == 1) {
-        _selectedM3u8Url = urls.first;
-        _loadAvailableStreams();
-      }
-    });
+    await _loadAvailableStreams();
   }
 
   Future<void> _loadAvailableStreams() async {
@@ -84,9 +70,25 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
         ? await provider.getAvailableLocalStreams(_selectedLocalFilePath!)
         : await provider.getAvailableStreams(_selectedM3u8Url!);
 
+    // DRM/暗号化ストリームをフィルタ（警告表示）
+    final encryptedStreams = streams.where((s) => s.isEncrypted || s.keyUri != null).toList();
+    final safeStreams = streams.where((s) => !s.isEncrypted && s.keyUri == null).toList();
+
+    if (encryptedStreams.isNotEmpty && safeStreams.isEmpty && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'このストリームはDRM保護されているため処理できません。\n'
+            '本ソフトウェアは暗号化コンテンツに対応していません。',
+          ),
+          duration: Duration(seconds: 5),
+        ),
+      );
+    }
+
     setState(() {
-      _availableStreams = streams;
-      _selectedStream = streams.isNotEmpty ? streams.first : null;
+      _availableStreams = safeStreams;
+      _selectedStream = safeStreams.isNotEmpty ? safeStreams.first : null;
       _isLoadingStreams = false;
     });
   }
@@ -103,7 +105,6 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
         setState(() {
           _selectedLocalFilePath = result.files.single.path!;
           _isLocalFile = true;
-          _detectedUrls = [];
           _selectedM3u8Url = null;
           _availableStreams = null;
           _selectedStream = null;
@@ -122,7 +123,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
   Future<void> _addToQueue() async {
     if (_selectedM3u8Url == null && _selectedLocalFilePath == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('動画URLまたはファイルを選択してください')),
+        const SnackBar(content: Text('M3U8 URLまたはファイルを指定してください')),
       );
       return;
     }
@@ -142,7 +143,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
     } else {
       await provider.addDownloadTask(
         m3u8Url: _selectedM3u8Url!,
-        websiteUrl: _websiteController.text,
+        websiteUrl: _selectedM3u8Url!, // M3U8 URL自体を記録
         fileName: fileName,
         selectedStream: _selectedStream,
       );
@@ -151,7 +152,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
     if (mounted) {
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('ダウンロードキューに追加しました')),
+        const SnackBar(content: Text('アーカイブキューに追加しました')),
       );
     }
   }
@@ -160,13 +161,35 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('新規ダウンロード'),
+        title: const Text('新規アーカイブ'),
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            // 注意書き
+            Card(
+              color: Colors.amber[50],
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline, color: Colors.amber[800], size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        '本ソフトウェアは著作権者自身の配信管理用途専用です。\n'
+                        '権利を持つHLSストリームのURLを直接入力してください。',
+                        style: TextStyle(fontSize: 12, color: Colors.amber[900]),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
             Card(
               child: Padding(
                 padding: const EdgeInsets.all(16),
@@ -174,31 +197,32 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      'ステップ1: WebサイトURLを入力',
+                      'ステップ1: M3U8 URLを入力',
                       style: Theme.of(context).textTheme.titleMedium,
                     ),
                     const SizedBox(height: 12),
                     TextField(
-                      controller: _websiteController,
+                      controller: _m3u8UrlController,
                       decoration: const InputDecoration(
-                        labelText: 'WebサイトURL',
-                        hintText: 'https://example.com/video',
+                        labelText: 'M3U8 URL',
+                        hintText: 'https://example.com/stream/playlist.m3u8',
                         border: OutlineInputBorder(),
                         prefixIcon: Icon(Icons.link),
+                        helperText: '自分が権利を持つHLSストリームのURLを入力',
                       ),
                       keyboardType: TextInputType.url,
                     ),
                     const SizedBox(height: 12),
                     ElevatedButton.icon(
-                      onPressed: _isDetecting ? null : _detectM3U8,
-                      icon: _isDetecting
+                      onPressed: _isLoadingStreams ? null : _setM3u8Url,
+                      icon: _isLoadingStreams
                           ? const SizedBox(
                               width: 20,
                               height: 20,
                               child: CircularProgressIndicator(strokeWidth: 2),
                             )
-                          : const Icon(Icons.search),
-                      label: Text(_isDetecting ? '検出中...' : '動画URLを検出'),
+                          : const Icon(Icons.check),
+                      label: Text(_isLoadingStreams ? '解析中...' : 'ストリーム解析'),
                     ),
                   ],
                 ),
@@ -271,45 +295,6 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                 ),
               ),
             ),
-            
-            if (_detectedUrls.isNotEmpty && !_isLocalFile) ...[
-              const SizedBox(height: 16),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(16),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'ステップ2: 動画URLを選択',
-                        style: Theme.of(context).textTheme.titleMedium,
-                      ),
-                      const SizedBox(height: 12),
-                      Text('${_detectedUrls.length}個の動画URLが見つかりました'),
-                      const SizedBox(height: 8),
-                      ..._detectedUrls.map((url) => RadioListTile<String>(
-                        title: Text(
-                          url,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(fontSize: 12),
-                        ),
-                        value: url,
-                        groupValue: _selectedM3u8Url,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedM3u8Url = value;
-                            _availableStreams = null;
-                            _selectedStream = null;
-                          });
-                          _loadAvailableStreams();
-                        },
-                      )),
-                    ],
-                  ),
-                ),
-              ),
-            ],
 
             if (_availableStreams != null && _availableStreams!.isNotEmpty) ...[
               const SizedBox(height: 16),
@@ -320,7 +305,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'ステップ3: 品質を選択',
+                        'ステップ2: 品質を選択',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
@@ -353,7 +338,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        'ステップ4: オプション設定',
+                        'ステップ3: オプション設定',
                         style: Theme.of(context).textTheme.titleMedium,
                       ),
                       const SizedBox(height: 12),
@@ -361,7 +346,7 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
                         controller: _fileNameController,
                         decoration: const InputDecoration(
                           labelText: 'ファイル名（オプション）',
-                          hintText: '例: my_video',
+                          hintText: '例: my_archive',
                           border: OutlineInputBorder(),
                           helperText: '空欄の場合は自動生成されます',
                         ),
@@ -395,8 +380,8 @@ class _UrlInputScreenState extends State<UrlInputScreen> {
               const SizedBox(height: 24),
               ElevatedButton.icon(
                 onPressed: _addToQueue,
-                icon: const Icon(Icons.download),
-                label: const Text('ダウンロード開始'),
+                icon: const Icon(Icons.archive),
+                label: const Text('アーカイブ開始'),
                 style: ElevatedButton.styleFrom(
                   padding: const EdgeInsets.all(16),
                   textStyle: const TextStyle(fontSize: 16),
