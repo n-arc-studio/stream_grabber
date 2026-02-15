@@ -42,7 +42,7 @@ class DownloaderService {
     String basePath = outputPath;
     if (_hasNonAscii(outputPath)) {
       final systemTemp = await getTemporaryDirectory();
-      basePath = '${systemTemp.path}/HLSBackupManager';
+      basePath = '${systemTemp.path}/StreamVault';
     }
 
     final dir = Directory('$basePath/temp_$taskId');
@@ -80,7 +80,7 @@ class DownloaderService {
 
   Future<String> getDownloadDirectory() async {
     final directory = await getApplicationDocumentsDirectory();
-    final downloadDir = Directory('${directory.path}/HLSBackupManager/Archives');
+    final downloadDir = Directory('${directory.path}/StreamVault/Archives');
     
     if (!await downloadDir.exists()) {
       await downloadDir.create(recursive: true);

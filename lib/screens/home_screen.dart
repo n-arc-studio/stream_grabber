@@ -32,7 +32,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HLS Backup Manager'),
+        title: const Text('StreamVault'),
         actions: [
           IconButton(
             icon: const Icon(Icons.settings),

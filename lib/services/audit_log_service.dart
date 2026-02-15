@@ -19,7 +19,7 @@ class AuditLogService {
   Future<File> _getLogFile() async {
     if (_logFile != null) return _logFile!;
     final dir = await getApplicationDocumentsDirectory();
-    final logDir = Directory('${dir.path}/HLSBackupManager/logs');
+    final logDir = Directory('${dir.path}/StreamVault/logs');
     if (!await logDir.exists()) {
       await logDir.create(recursive: true);
     }

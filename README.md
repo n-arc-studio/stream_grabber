@@ -1,8 +1,8 @@
-# HLS Backup Manager
+# StreamVault
 
-**HLSストリーミング配信管理ツール**
+**HLS Backup Manager — HLSストリーミング配信管理ツール**
 
-HLS Backup Managerは、著作権者自身が権利を持つHLSストリーミング配信のアーカイブ・品質検査・バックアップを行うための業務用ツールです。M3U8プレイリストからセグメントを取得し、MP4またはMKV形式に自動変換します。
+StreamVaultは、著作権者自身が権利を持つHLSストリーミング配信のアーカイブ・品質検査・バックアップを行うための業務用ツールです。M3U8プレイリストからセグメントを取得し、MP4またはMKV形式に自動変換します。
 
 > **本ソフトウェアは著作権者自身の配信管理用途専用です。**  
 > DRM保護されたコンテンツには対応していません。
@@ -43,7 +43,7 @@ DRM保護されたストリームは自動的に除外されます。
 
 ### 5. 完了
 
-セグメント取得と結合が完了すると、`Documents/HLSBackupManager/Archives/` にMP4/MKVファイルが保存されます。
+セグメント取得と結合が完了すると、`Documents/StreamVault/Archives/` にMP4/MKVファイルが保存されます。
 
 ## 必要要件
 
@@ -121,5 +121,5 @@ lib/
 
 ---
 
-**HLS Backup Manager** — HLSストリーミング配信管理ツール  
-© 2026 HLS Backup Manager. All rights reserved.
+**StreamVault** — HLS Backup Manager  
+© 2026 StreamVault. All rights reserved.

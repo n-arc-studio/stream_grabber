@@ -26,7 +26,7 @@ class MyApp extends StatelessWidget {
     return ChangeNotifierProvider(
       create: (_) => DownloadProvider(),
       child: MaterialApp(
-        title: 'HLS Backup Manager',
+        title: 'StreamVault',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           colorScheme: ColorScheme.fromSeed(
@@ -109,12 +109,12 @@ class _DisclaimerGateState extends State<DisclaimerGate> {
               const Icon(Icons.security, size: 64, color: Colors.deepPurple),
               const SizedBox(height: 24),
               const Text(
-                'HLS Backup Manager',
+                'StreamVault',
                 style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold),
               ),
               const SizedBox(height: 8),
               const Text(
-                'HLSストリーミング配信管理ツール',
+                'HLS Backup Manager',
                 style: TextStyle(fontSize: 16, color: Colors.grey),
               ),
               const SizedBox(height: 32),
@@ -209,7 +209,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Text('HLS Backup Managerのライセンスキーを入力してください。'),
+            const Text('StreamVaultのライセンスキーを入力してください。'),
             const SizedBox(height: 16),
             TextField(
               controller: controller,
@@ -268,7 +268,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text('HLS Backup Manager'),
+        title: const Text('StreamVault'),
       ),
       body: Center(
         child: Padding(
@@ -283,7 +283,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
               ),
               const SizedBox(height: 24),
               const Text(
-                'HLS Backup Manager',
+                'StreamVault',
                 style: TextStyle(
                   fontSize: 32,
                   fontWeight: FontWeight.bold,
@@ -291,7 +291,7 @@ class _LicenseCheckScreenState extends State<LicenseCheckScreen> {
               ),
               const SizedBox(height: 16),
               const Text(
-                'HLSストリーミング配信管理ツール',
+                'HLS Backup Manager',
                 style: TextStyle(fontSize: 16),
                 textAlign: TextAlign.center,
               ),
